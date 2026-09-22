@@ -1,0 +1,23 @@
+name: bst-tree
+on:
+  push:
+    paths: ['contrib/bst-tree/**', '.github/workflows/bst-tree.yml']
+  pull_request:
+    paths: ['contrib/bst-tree/**', '.github/workflows/bst-tree.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '${{ matrix.python }}'
+      - run: python -m pip install './contrib/bst-tree[test]' 'BuildStream==2.8.0'
+      - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
+        env:
+          BST_TREE_TEST_LIVE: "1"
