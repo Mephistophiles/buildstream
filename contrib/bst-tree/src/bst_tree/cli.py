@@ -20,7 +20,7 @@ import sys
 import threading
 
 from .adapter import capture
-from .diff import compare, has_changes, render_tree
+from .diff import DIFF_FIELDS, compare, has_changes, render_tree
 from .model import read_snapshot, write_snapshot
 
 
@@ -41,7 +41,25 @@ def parser():
     diff.add_argument("new")
     diff.add_argument("--format", choices=("tree", "json"), default="tree")
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
-    diff.add_argument("--check", action="store_true", help="Exit 1 when snapshots differ")
+    selection = diff.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--fields",
+        nargs="+",
+        choices=DIFF_FIELDS,
+        help="Only compare these fields; node, edge and target changes are always included",
+    )
+    selection.add_argument(
+        "--ignore-fields",
+        nargs="+",
+        choices=DIFF_FIELDS,
+        help="Compare all fields except these (e.g. key to hide cache-key changes)",
+    )
+    selection.add_argument(
+        "--structure-only",
+        action="store_true",
+        help="Only compare nodes, dependencies, dependency types and targets",
+    )
+    diff.add_argument("--check", action="store_true", help="Exit 1 when the selected comparison has changes")
     return result
 
 
@@ -85,7 +103,14 @@ def main(argv=None):
     try:
         if args.command == "diff":
             old, new = read_snapshot(args.old), read_snapshot(args.new)
-            delta = compare(old, new)
+            fields = set(DIFF_FIELDS)
+            if args.structure_only:
+                fields = set()
+            elif args.fields is not None:
+                fields = set(args.fields)
+            elif args.ignore_fields:
+                fields -= set(args.ignore_fields)
+            delta = compare(old, new, fields=fields)
             print(
                 json.dumps(delta, ensure_ascii=False, indent=2, sort_keys=True)
                 if args.format == "json"

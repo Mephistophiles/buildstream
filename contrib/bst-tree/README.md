@@ -42,7 +42,26 @@ with later occurrences linking to the earlier node. Counts refer to unique nodes
 and edges. Renames appear as removal plus addition. Metadata differences are
 reported separately. Colors are emitted only to a terminal.
 
-Normal success exits 0. With `--check`, differences (including metadata) exit 1.
+By default all fields are compared, including cache keys. To focus on a dependency
+reorganization or specific attributes:
+
+```sh
+bst-tree diff before.json after.json --structure-only
+bst-tree diff before.json after.json --ignore-fields key
+bst-tree diff before.json after.json --fields kind source_info workspace
+```
+
+`--fields` selects attributes and `--ignore-fields` excludes attributes. Available
+fields are `kind`, `key` (cache key), `source_info`, `workspace`, and `metadata`
+(snapshot metadata). These options and `--structure-only` are mutually exclusive.
+Node additions/removals, dependency edges and their build/run types, and targets
+are always compared. `--structure-only` skips all attributes and snapshot metadata.
+Filtering applies to tree and JSON output, counts, and `--check`; nodes changed
+only in ignored fields disappear from the diff. JSON node `old`/`new` objects
+contain only selected attributes (empty objects in structure-only mode).
+`--all` can be combined with any filter to show unchanged branches as context.
+
+Normal success exits 0. With `--check`, differences in the selected comparison exit 1.
 Errors exit 2. JSON output has its own `format_version: 1`, a summary, node and edge
 changes with `old`/`new`, and metadata changes.
 

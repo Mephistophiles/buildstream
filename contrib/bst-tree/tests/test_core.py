@@ -197,6 +197,104 @@ def test_key_only_is_not_source_change():
     assert "source_info:" not in output
 
 
+@pytest.mark.parametrize("output_format", ["tree", "json"])
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--ignore-fields", "key"],
+        ["--structure-only"],
+        ["--fields", "kind", "source_info", "workspace", "metadata"],
+    ],
+)
+def test_cli_filtered_cache_changes(tmp_path, capsys, output_format, selection):
+    old, new = graph(), graph()
+    new.nodes["app.bst"]["key"] = "new-cache-key"
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+    args = ["diff", str(a), str(b), "--check", "--format", output_format, *selection]
+    assert main(args) == 0
+    output = capsys.readouterr().out
+    assert "new-cache-key" not in output
+    if output_format == "json":
+        assert not has_changes(json.loads(output))
+    else:
+        assert "No changes." in output
+        assert "app.bst" not in output
+
+
+def test_selected_fields_preserve_source_changes():
+    old, new = graph(), graph()
+    new.nodes["app.bst"].update(key="new-cache-key", source_info=[{"version": "new"}])
+    new.nodes["compiler.bst"]["key"] = "another-cache-key"
+    new.metadata = {"bst_version": "new"}
+    delta = compare(old, new, fields=["source_info"])
+    assert delta["summary"]["nodes_modified"] == 1
+    assert delta["nodes"][0]["new"] == {"source_info": [{"version": "new"}]}
+    assert delta["metadata"] == {}
+    output = render_tree(old, new, delta)
+    assert "source_info:" in output
+    assert "key:" not in output
+    assert "compiler.bst" not in output
+    assert "compiler.bst" in render_tree(old, new, delta, show_all=True)
+    assert compare(old, new, fields=["metadata"])["metadata"]["metadata"]["new"] == new.metadata
+
+
+def test_structure_only_reorganization(tmp_path, capsys):
+    old, new = graph(), graph()
+    for data in new.nodes.values():
+        data.update(key="new-cache-key", kind="changed", workspace=True, source_info=[])
+    new.metadata = {"bst_version": "new"}
+    del new.edges["compiler.bst", "bootstrap.bst"]
+    del new.nodes["bootstrap.bst"]
+    new.nodes["extra.bst"] = node("new-cache-key")
+    new.edges["app.bst", "extra.bst"] = frozenset(["run"])
+    new.edges["app.bst", "compiler.bst"] = frozenset(["build", "run"])
+    del new.edges["app.bst", "sub:lib.bst"]
+    new.edges["extra.bst", "sub:lib.bst"] = frozenset(["run"])
+    new.targets.append("extra.bst")
+    delta = compare(old, new, fields=[])
+    assert delta["summary"] == {
+        "nodes_added": 1,
+        "nodes_removed": 1,
+        "nodes_modified": 0,
+        "edges_added": 2,
+        "edges_removed": 2,
+        "edges_modified": 1,
+    }
+    assert set(delta["metadata"]) == {"targets"}
+    assert delta["nodes"] == [
+        {"name": "bootstrap.bst", "change": "removed", "old": {}, "new": None},
+        {"name": "extra.bst", "change": "added", "old": None, "new": {}},
+    ]
+    output = render_tree(old, new, delta)
+    assert "- bootstrap.bst" in output
+    assert "+ extra.bst" in output
+    assert "build -> build/run" in output
+    assert "key:" not in output
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+    assert main(["diff", str(a), str(b), "--structure-only", "--format", "json", "--check"]) == 1
+    assert json.loads(capsys.readouterr().out) == delta
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--fields", "unknown"],
+        ["--ignore-fields", "unknown"],
+        ["--fields"],
+        ["--structure-only", "--fields", "key"],
+        ["--fields", "key", "--ignore-fields", "kind"],
+    ],
+)
+def test_invalid_diff_filters(selection):
+    with pytest.raises(SystemExit) as error:
+        main(["diff", "old.json", "new.json", *selection])
+    assert error.value.code == 2
+
+
 def test_atomic_write_preserves_previous_on_error(tmp_path):
     path = tmp_path / "snapshot.json"
     write_snapshot(graph(), path)

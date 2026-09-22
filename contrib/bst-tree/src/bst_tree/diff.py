@@ -16,11 +16,23 @@
 from collections import deque
 import json
 
+NODE_FIELDS = ("kind", "key", "source_info", "workspace")
+DIFF_FIELDS = (*NODE_FIELDS, "metadata")
 
-def compare(old, new):
+
+def compare(old, new, fields=None):
+    """Compare selected attributes, always retaining node/edge/target changes."""
+    fields = set(DIFF_FIELDS if fields is None else fields)
+    unknown = fields - set(DIFF_FIELDS)
+    if unknown:
+        raise ValueError("Unknown diff fields: " + ", ".join(sorted(unknown)))
+
+    def selected(node):
+        return {field: value for field, value in node.items() if field in fields} if node is not None else None
+
     nodes = []
     for name in sorted(old.nodes.keys() | new.nodes.keys()):
-        before, after = old.nodes.get(name), new.nodes.get(name)
+        before, after = selected(old.nodes.get(name)), selected(new.nodes.get(name))
         if before != after:
             nodes.append(
                 {
@@ -45,7 +57,7 @@ def compare(old, new):
             )
     metadata = {}
     for field, before, after in (("targets", old.targets, new.targets), ("metadata", old.metadata, new.metadata)):
-        if before != after:
+        if (field == "targets" or field in fields) and before != after:
             metadata[field] = {"old": before, "new": after}
     summary = {
         f"{category}_{kind}": sum(item["change"] == kind for item in items)
