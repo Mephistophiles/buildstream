@@ -91,7 +91,7 @@ def test_diff_edge_and_source_changes():
     assert "build -> build/run" in output
     assert "- bootstrap.bst" in output
     assert "source_info" in output
-    assert "(see above)" in output
+    assert "see above" not in output
 
 
 def test_cycle_is_bounded():
@@ -305,3 +305,87 @@ def test_atomic_write_preserves_previous_on_error(tmp_path):
         write_snapshot(broken, path)
     assert path.read_bytes() == before
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("fields", [[], ["kind", "source_info", "workspace", "metadata"]])
+def test_removed_edge_does_not_include_unchanged_shared_branch(fields):
+    old, new = graph(), graph()
+    del new.edges["compiler.bst", "sub:lib.bst"]
+    new.nodes["bootstrap.bst"]["key"] = "ignored"
+    delta = compare(old, new, fields=fields)
+    output = render_tree(old, new, delta)
+    assert output == (
+        "Nodes: +0 -0 ~0; edges: +0 -1 ~0\n"
+        "  app.bst\n"
+        "`--   compiler.bst [build]\n"
+        "    `--   sub:lib.bst [- run -> none]"
+    )
+    assert "bootstrap.bst" in render_tree(old, new, delta, show_all=True)
+    reverse = render_tree(old, new, delta, reverse=True)
+    assert reverse == (
+        "Nodes: +0 -0 ~0; edges: +0 -1 ~0\n"
+        "Reverse dependencies (dependency -> consumers):\n"
+        "  sub:lib.bst\n"
+        "`--   compiler.bst [- run -> none]\n"
+        "    `--   app.bst [build]"
+    )
+
+
+def test_shared_leaf_repeats_changes_without_reference():
+    old, new = graph(), graph()
+    new.nodes["sub:lib.bst"]["workspace"] = True
+    output = render_tree(old, new, compare(old, new))
+    assert output.count("workspace: false -> true") == 2
+    assert "shared subtree" not in output
+    assert "see above" not in output
+    assert "bootstrap.bst" not in output
+
+
+def test_shared_subtree_reference_is_explicit_and_bounded():
+    old, new = graph(), graph()
+    for g in (old, new):
+        g.nodes["leaf.bst"] = node()
+        g.edges["sub:lib.bst", "leaf.bst"] = frozenset(["run"])
+    new.nodes["leaf.bst"]["workspace"] = True
+    output = render_tree(old, new, compare(old, new))
+    assert "shared subtree: sub:lib.bst; expanded at line 4" in output
+    assert output.count("workspace: false -> true") == 1
+
+
+@pytest.mark.parametrize(
+    "mode,tty,no_color,expected",
+    [
+        ("auto", False, False, False),
+        ("auto", True, False, True),
+        ("auto", True, True, False),
+        ("always", False, True, True),
+        ("never", True, False, False),
+    ],
+)
+def test_cli_color_and_reverse(tmp_path, capsys, monkeypatch, mode, tty, no_color, expected):
+    import sys
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    old, new = graph(), graph()
+    del new.edges["compiler.bst", "sub:lib.bst"]
+    new.nodes["compiler.bst"]["workspace"] = True
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+    args = ["diff", str(a), str(b), "--reverse", "--color", mode, "--check"]
+    assert main(args) == 1
+    output = capsys.readouterr().out
+    assert ("\033[" in output) == expected
+    assert "Reverse dependencies" in output
+    if expected:
+        assert "\033[31m- run -> none\033[0m" in output
+        assert "\033[33m~ compiler.bst\033[0m" in output
+        assert "\033[32mtrue\033[0m" in output
+    assert main([*args, "--format", "json"]) == 1
+    output = capsys.readouterr().out
+    assert "\033[" not in output
+    assert json.loads(output) == compare(old, new)

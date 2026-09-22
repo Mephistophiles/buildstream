@@ -15,6 +15,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -41,6 +42,13 @@ def parser():
     diff.add_argument("new")
     diff.add_argument("--format", choices=("tree", "json"), default="tree")
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
+    diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
+    diff.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="Color tree output (default: auto; respects NO_COLOR)",
+    )
     selection = diff.add_mutually_exclusive_group()
     selection.add_argument(
         "--fields",
@@ -114,7 +122,15 @@ def main(argv=None):
             print(
                 json.dumps(delta, ensure_ascii=False, indent=2, sort_keys=True)
                 if args.format == "json"
-                else render_tree(old, new, delta, args.all, sys.stdout.isatty())
+                else render_tree(
+                    old,
+                    new,
+                    delta,
+                    args.all,
+                    args.color == "always"
+                    or (args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ),
+                    reverse=args.reverse,
+                )
             )
             return 1 if args.check and has_changes(delta) else 0
         if args.command == "snapshot":

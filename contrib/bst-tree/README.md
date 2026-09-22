@@ -36,11 +36,43 @@ under multiple parents. Reverse dependencies and paths refer to the selected sco
 ## Comparison
 
 `diff` is always noninteractive. `+`, `-`, and `~` mark additions, removals, and
-changes. Edge annotations show old/new build/run types. Unchanged ancestors provide
-context; `--all` includes unchanged branches. Shared subgraphs are printed once,
-with later occurrences linking to the earlier node. Counts refer to unique nodes
+changes. Edge annotations show old/new build/run types. Only changed branches and
+their ancestor context are shown; unchanged paths to the dependency of a changed
+edge are omitted. Filtering attributes also removes branches whose only changes
+were in ignored fields. `--all` includes unchanged branches. Shared leaves repeat
+their local changes without a reference. Shared subtrees are expanded once, with
+later occurrences naming the shared node and the exact output line containing its
+expansion. This keeps large shared graphs and cycles bounded. Counts refer to unique nodes
 and edges. Renames appear as removal plus addition. Metadata differences are
-reported separately. Colors are emitted only to a terminal.
+reported separately. `--color auto` (the default) enables colors in a terminal,
+unless `NO_COLOR` is set. Use `--color always` to preserve colors through a pipe
+(for example, `less -R`) or `--color never` to disable them. Additions are green,
+removals red, modifications yellow; old/new attribute values are red/green.
+JSON output never contains color escapes.
+
+The default direction is target -> dependencies: use it to see what changed inside
+a target or compiler. `--reverse` renders dependency -> consumers, useful for
+seeing where a dependency was removed:
+
+```sh
+bst-tree diff before.json after.json --structure-only --reverse
+```
+
+For example, removing `compiler.bst -> lib.bst` while keeping `app.bst -> lib.bst`
+produces this reverse tree (the unchanged direct use by `app.bst` is omitted):
+
+```text
+Nodes: +0 -0 ~0; edges: +0 -1 ~0
+Reverse dependencies (dependency -> consumers):
+  lib.bst
+`--   compiler.bst [- run -> none]
+    `--   app.bst [build]
+```
+
+Here the edge annotation on `compiler.bst` describes its dependency on `lib.bst`.
+This shows changed declared relationships and context, not a calculation of
+whether a target lost all transitive paths to a dependency. `--reverse` only changes
+tree presentation; JSON edge directions, counts, and `--check` are unchanged.
 
 By default all fields are compared, including cache keys. To focus on a dependency
 reorganization or specific attributes:
