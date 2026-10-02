@@ -33,6 +33,28 @@ from each applicable target, and `q` exits (cancelling a pending load).
 Children are materialized only when expanded. Shared dependencies may be explored
 under multiple parents. Reverse dependencies and paths refer to the selected scope.
 
+Select an element and press `m` for its action menu, or use these shortcuts:
+
+- `a`: list the locally cached artifact's files, with permissions and sizes
+  (`bst artifact list-contents --long`). Missing artifacts produce an error in
+  the viewer; no build or artifact pull is started.
+- `b`: show the resolved element configuration, including build commands where
+  supported by its kind, plus variables and environment (`bst show`). These are
+  the effective settings, rather than the original `.bst` YAML or a build log.
+- `c`: show source provenance and browse files directly in an existing workspace.
+  Without a workspace, only plugin-provided source information (including any
+  URLs/refs) is available. No source checkout, fetch, or temporary copy is made.
+
+The viewers load on demand without blocking navigation back to the tree. Escape
+or `q` closes a viewer and cancels its pending command, preserving tree expansion
+and selection. Use Tab to switch between workspace files and the text preview;
+arrow keys and Page Up/Down scroll the focused widget. Text is read-only, previews
+are limited to 256 KiB, binary files are identified, and symlinks are not browsed.
+Workspace contents reflect current local edits, not necessarily the built artifact.
+Each reopened viewer queries the live project again using the same directory,
+options, and strict mode as graph loading. Snapshot browsing keeps these actions
+unavailable because snapshots do not contain configuration or files.
+
 ## Comparison
 
 `diff` is always noninteractive. `+`, `-`, and `~` mark additions, removals, and
@@ -119,9 +141,83 @@ data: source provenance may contain URLs and other plugin-provided information.
 
 ## Development
 
+### Architecture before element inspection (2026-10-02)
+
+The original implementation has five layers:
+
+- `cli.py` parses `browse`, `snapshot`, and `diff`. Only `browse` imports
+  Textual. `CancellableRunner` owns a single `bst` subprocess, captures its
+  diagnostics, and terminates it when the application exits.
+- `adapter.py` calls the public `bst show` CLI three times: version, the full
+  graph, and canonical target names. Random record/field delimiters frame
+  multiline YAML. It records kind, cache key, source provenance, workspace
+  presence, and build/run edges; it does not load element files or contents.
+- `model.py` owns the UI-independent `Graph`, scoped graphs, shortest paths,
+  validation, and atomic version-1 JSON snapshot writes. A node is keyed by
+  its full junction-qualified name; an edge carries build/run types.
+- `diff.py` compares snapshots and renders text/JSON, with attribute filters,
+  reverse edges, and bounded rendering of shared subtrees and cycles.
+- `tui.py` owns a Textual `Explorer`: header, search input, dependency `Tree`,
+  JSON details `Static`, status, and footer. Graph loading runs in a thread.
+  Each UI occurrence stores its ancestor path, allowing shared dependencies
+  to appear repeatedly. Children are populated on expansion. Scope and reverse
+  mode rebuild the tree; reverse mode saves expanded paths and selection.
+
+Original menu/navigation weaknesses to retain as regression cases:
+
+- All actions live at application level alongside the tree's own bindings;
+  focus and shortcut routing must be handled when adding other views.
+- The footer lists every navigation shortcut and has no compact action menu;
+  terminal resize is tested, but action visibility at small sizes is not.
+- Selecting the synthetic root leaves the previous element's details visible.
+- Escape in the search input also leaves reverse mode, instead of just closing
+  search. Reverse/search restoration and queued expansion events share mutable
+  tree state and need care around rebuilds.
+
+Existing tests cover graph parsing/snapshots/diffs, headless TUI navigation,
+lazy expansion, cycles, and loading cancellation. Live CLI coverage is opt-in.
+
+### Element inspection extension
+
+`inspection.py` provides `ProjectInspector` and bounded workspace file previews.
+It uses the public CLI and has no dependency on Textual or private cache layouts.
+`inspection_tui.py` contains the element menu and an isolated inspection screen
+with a read-only text viewer and lazy workspace directory tree. Each screen owns
+its cancellable command runner; background results cannot update a closed screen.
+`cli.py` supplies a factory for live projects, while snapshot browsing supplies
+none. The graph model and snapshot format are unchanged.
+
+The extension also clears stale root details, closes search before leaving reverse
+mode on Escape, and prevents graph shortcuts from firing inside inspection views
+while retaining Tab/Shift+Tab focus navigation. Queued expansion and highlight
+events from previous tree roots are ignored after a rebuild.
+The footer hides redundant navigation bindings and exposes the scrollable element
+menu. Tests cover these focus/return paths, a small terminal, command arguments,
+unavailable artifacts/workspaces, bounded file previews, and queued scope changes.
+
 ```sh
 python -m pip install -e './contrib/bst-tree[test]'
 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
 # Include live integration tests when bst and buildbox-casd are available:
 BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
 ```
+
+Verified locally with BuildStream 2.8.0, Python 3.14, and Textual 8.2 on macOS
+ARM64: all 62 tests pass, including live graph/snapshot comparison, resolved build
+configuration, workspace file inspection, a missing artifact, and contents of a
+real artifact built from an `import` element.
+
+```sh
+source .venv-bst-tree/bin/activate
+python -m pip install 'buildstream==2.8.0' -e './contrib/bst-tree[test]'
+# macOS: buildbox-casd is supplied by Homebrew's recc package.
+brew install recc
+ulimit -n 4096
+BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
+```
+
+The live test fixes its sandbox target to Linux/aarch64 and does not execute target
+binaries. BuildStream 2.8.0 does not recognize Darwin's `arm64` host spelling when
+deriving a default sandbox architecture; projects on this host need an explicit
+`sandbox.build-arch` such as `aarch64`. The higher file descriptor limit is needed
+by `buildbox-casd`; macOS's default of 256 was insufficient in this verification.

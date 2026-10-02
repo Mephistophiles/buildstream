@@ -76,12 +76,17 @@ def parse_report(report, marker):
     return nodes, {edge: frozenset(kinds) for edge, kinds in edges.items()}
 
 
-def capture(targets, directory=None, options=(), run=subprocess.run):
+def command_base(directory=None, options=()):
     base = ["bst", "--no-colors", "--strict"]
     if directory:
         base += ["-C", str(directory)]
     for name, value in options:
         base += ["--option", name, value]
+    return base
+
+
+def capture(targets, directory=None, options=(), run=subprocess.run):
+    base = command_base(directory, options)
 
     def execute(arguments):
         result = run(base + arguments, stdout=subprocess.PIPE, text=True, check=False)

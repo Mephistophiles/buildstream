@@ -20,6 +20,7 @@ import pytest
 from bst_tree.adapter import capture
 from bst_tree.diff import compare
 from bst_tree.model import read_snapshot, write_snapshot
+from bst_tree.inspection import ProjectInspector, preview_file
 
 
 @pytest.mark.skipif(
@@ -31,7 +32,12 @@ def test_live_buildstream(tmp_path, monkeypatch):
     project = tmp_path / "project"
     elements = project / "elements"
     elements.mkdir(parents=True)
-    (project / "project.conf").write_text("name: tree-test\nmin-version: '2.0'\nelement-path: elements\n")
+    # Fix the target platform: BuildStream 2.8.0 does not recognize Darwin's
+    # 'arm64' host spelling, and these fixtures never execute target binaries.
+    (project / "project.conf").write_text(
+        "name: tree-test\nmin-version: '2.0'\nelement-path: elements\n"
+        "sandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+    )
     (elements / "app.bst").write_text("kind: manual\ndepends:\n- lib.bst\n")
     (elements / "lib.bst").write_text("kind: stack\n")
     old = capture(["app.bst"], directory=project)
@@ -43,3 +49,28 @@ def test_live_buildstream(tmp_path, monkeypatch):
     (elements / "app.bst").write_text("kind: manual\nbuild-depends:\n- lib.bst\n")
     new = capture(["app.bst"], directory=project)
     assert compare(old, new)["summary"]["edges_modified"] == 1
+
+    # Inspect through the installed public CLI, including workspace display format.
+    (project / "source").mkdir()
+    (project / "source" / "main.c").write_text("int main() {}\n")
+    (elements / "code.bst").write_text(
+        "kind: manual\nsources:\n- kind: local\n  path: source\n"
+        "config:\n  build-commands:\n  - echo hello\n"
+    )
+    inspector = ProjectInspector(project)
+    assert "echo hello" in inspector.load("code.bst", "build").text
+    assert inspector.load("code.bst", "sources").workspace is None
+    workspace = tmp_path / "workspace"
+    inspector.execute(["workspace", "open", "--directory", str(workspace), "--", "code.bst"])
+    result = inspector.load("code.bst", "sources")
+    assert result.workspace == workspace.resolve()
+    assert preview_file(workspace, workspace / "main.c") == "int main() {}\n"
+    with pytest.raises(ValueError):
+        inspector.load("code.bst", "artifacts")
+
+    # Import elements produce a real cached artifact without running a shell or
+    # requiring a Linux build sandbox, so this also exercises macOS installations.
+    (elements / "import.bst").write_text("kind: import\nsources:\n- kind: local\n  path: source\n")
+    inspector.execute(["build", "--", "import.bst"])
+    contents = inspector.load("import.bst", "artifacts").text
+    assert "main.c" in contents

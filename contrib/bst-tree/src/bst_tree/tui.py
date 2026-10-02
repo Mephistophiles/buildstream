@@ -19,8 +19,11 @@ import json
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Input, Static, Tree
+
+from .inspection_tui import ElementMenu, InspectionScreen
 
 
 class DependencyTree(Tree):
@@ -29,6 +32,21 @@ class DependencyTree(Tree):
 
 class Explorer(App):
     TITLE = "bst-tree"
+    GRAPH_ACTIONS = {
+        "menu",
+        "inspect",
+        "toggle",
+        "left",
+        "right",
+        "down",
+        "up",
+        "search",
+        "next_match",
+        "reverse",
+        "why",
+        "scope",
+        "back",
+    }
     CSS = """
     #body { height: 1fr; }
     #tree { width: 1fr; }
@@ -38,25 +56,30 @@ class Explorer(App):
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("space", "toggle", "Expand"),
-        ("h", "left", "Parent"),
-        ("l", "right", "Expand"),
-        ("j", "down", "Down"),
-        ("k", "up", "Up"),
+        ("m", "menu", "Element"),
+        Binding("a", "inspect('artifacts')", "Artifacts", show=False),
+        Binding("b", "inspect('build')", "Build", show=False),
+        Binding("c", "inspect('sources')", "Sources", show=False),
+        Binding("space", "toggle", "Expand", show=False),
+        Binding("h", "left", "Parent", show=False),
+        Binding("l", "right", "Expand", show=False),
+        Binding("j", "down", "Down", show=False),
+        Binding("k", "up", "Up", show=False),
         ("slash", "search", "Search"),
-        ("n", "next_match(1)", "Next"),
-        ("N", "next_match(-1)", "Previous"),
+        Binding("n", "next_match(1)", "Next", show=False),
+        Binding("N", "next_match(-1)", "Previous", show=False),
         ("r", "reverse", "Reverse"),
         ("w", "why", "Why"),
         ("s", "scope", "Scope"),
         ("escape", "back", "Back"),
     ]
 
-    def __init__(self, graph=None, loader=None, cancel_loader=None):
+    def __init__(self, graph=None, loader=None, cancel_loader=None, inspector_factory=None):
         super().__init__()
         self.graph = graph
         self.loader = loader
         self.cancel_loader = cancel_loader
+        self.inspector_factory = inspector_factory
         self.scope = "all"
         self.reverse_root = None
         self.matches = []
@@ -77,7 +100,15 @@ class Explorer(App):
             self.cancel_loader()
 
     def check_action(self, action, parameters):
-        return self.graph is not None or action == "quit"
+        # Keep Textual's standard actions (including Tab/Shift+Tab) available
+        # in every screen; only graph actions depend on the explorer's context.
+        if action not in self.GRAPH_ACTIONS:
+            return super().check_action(action, parameters)
+        if len(self.screen_stack) > 1:
+            return False
+        if isinstance(self.focused, Input) and action != "back":
+            return False
+        return self.graph is not None
 
     async def on_mount(self):
         if self.graph is not None:
@@ -100,6 +131,7 @@ class Explorer(App):
         self.adjacency = self.view.adjacency(reverse=self.reverse_root is not None)
         tree = self.query_one(Tree)
         tree.clear()
+        self.query_one("#details", Static).update("Select an element")
         tree.root.set_label(f"{self.scope}: " + ("Reverse dependencies" if self.reverse_root else "Dependencies"))
         roots = [self.reverse_root] if self.reverse_root else self.view.targets
         for name in roots:
@@ -119,15 +151,30 @@ class Explorer(App):
         )
         return node
 
+    def is_current_node(self, node):
+        tree = self.query_one("#tree", Tree)
+        if node.tree is not tree:
+            return False
+        # clear() replaces the root but reuses the Tree widget and node IDs.
+        # Queued events must belong to the current root, even if their element
+        # name is still present in the new scope or direction.
+        while node.parent is not None:
+            node = node.parent
+        return node is tree.root
+
     @on(Tree.NodeExpanded)
     def expanded(self, event):
         node = event.node
+        if not self.is_current_node(node):
+            return
         if node.data and not node.children and node.data[-1] not in node.data[:-1]:
             for child, kinds in self.adjacency[node.data[-1]]:
                 self.add_occurrence(node, child, node.data, kinds)
 
     @on(Tree.NodeHighlighted)
     def highlighted(self, event):
+        if not self.is_current_node(event.node):
+            return
         if event.node.data:
             name = event.node.data[-1]
             data = self.graph.nodes[name]
@@ -139,6 +186,28 @@ class Explorer(App):
                 ],
             }
             self.query_one("#details", Static).update(json.dumps(details, ensure_ascii=False, indent=2))
+        else:
+            self.query_one("#details", Static).update("Select an element")
+
+    def action_menu(self):
+        name = self.selected()
+        if name:
+            self.push_screen(ElementMenu(name, self.inspector_factory is not None), self.open_inspection)
+        else:
+            self.query_one("#status", Static).update("Select an element first")
+
+    def open_inspection(self, section):
+        if section:
+            self.action_inspect(section)
+
+    def action_inspect(self, section):
+        name = self.selected()
+        if not name:
+            self.query_one("#status", Static).update("Select an element first")
+        elif self.inspector_factory is None:
+            self.query_one("#status", Static).update("Live project required; snapshots contain graph metadata only")
+        else:
+            self.push_screen(InspectionScreen(name, section, self.inspector_factory()))
 
     def selected(self):
         node = self.query_one(Tree).cursor_node
@@ -227,7 +296,11 @@ class Explorer(App):
             self.rebuild()
 
     def action_back(self):
-        self.query_one(Input).display = False
+        search = self.query_one(Input)
+        if search.display:
+            search.display = False
+            self.query_one(Tree).focus()
+            return
         if self.reverse_root:
             self.reverse_root = None
             self.rebuild()

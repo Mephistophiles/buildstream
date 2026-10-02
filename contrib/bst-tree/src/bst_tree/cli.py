@@ -23,6 +23,7 @@ import threading
 from .adapter import capture
 from .diff import DIFF_FIELDS, compare, has_changes, render_tree
 from .model import read_snapshot, write_snapshot
+from .inspection import ProjectInspector
 
 
 def parser():
@@ -145,6 +146,11 @@ def main(argv=None):
         from .tui import Explorer
 
         runner = CancellableRunner()
+
+        def inspector_factory():
+            inspection_runner = CancellableRunner()
+            return ProjectInspector(args.directory, args.option, run=inspection_runner, cancel=inspection_runner.cancel)
+
         try:
             if args.snapshot:
                 app = Explorer(graph=read_snapshot(args.snapshot))
@@ -152,6 +158,7 @@ def main(argv=None):
                 app = Explorer(
                     loader=lambda: capture(args.targets, args.directory, args.option, run=runner),
                     cancel_loader=runner.cancel,
+                    inspector_factory=inspector_factory,
                 )
             code = app.run() or 0
             if getattr(app, "load_error", None):

@@ -11,10 +11,13 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-from textual.widgets import Input, Static, Tree
+from textual.events import Key
+from textual.widgets import Button, Input, Static, TextArea, Tree
 
 from bst_tree.model import Graph
 from bst_tree.tui import Explorer
+from bst_tree.inspection import Inspection
+from bst_tree.inspection_tui import ElementMenu, InspectionScreen, WorkspaceTree
 from test_core import graph, node
 
 
@@ -111,3 +114,199 @@ async def test_arrow_keys_and_literal_labels():
         assert "[build]" in str(root.children[0].label)
         await pilot.press("left")
         assert not root.is_expanded
+
+
+async def test_search_escape_preserves_reverse_and_root_clears_details():
+    app = Explorer(graph=graph())
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.pause()
+        await pilot.press("r", "/", "a", "b", "c", "q", "s")
+        assert app.query_one(Input).value == "abcqs"
+        await pilot.press("escape")
+        assert app.reverse_root == "app.bst"
+        await pilot.press("escape")
+        await pilot.pause()
+        tree.move_cursor(tree.root)
+        await pilot.pause()
+        assert "Select an element" in str(app.query_one("#details", Static).render())
+
+
+async def test_queued_expand_and_scope_change():
+    app = Explorer(graph=graph())
+    async with app.run_test() as pilot:
+        await app.reveal(["app.bst", "compiler.bst"])
+        await pilot.pause()
+        # Queue both keys before the expansion event reaches the application.
+        app.post_message(Key("right", None))
+        app.post_message(Key("s", "s"))
+        await pilot.pause()
+        assert app.scope == "run"
+        assert "compiler.bst" not in app.view.nodes
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("right")
+        assert [child.data[-1] for child in tree.root.children[0].children] == ["sub:lib.bst"]
+
+
+async def test_stale_tree_events_after_rebuild():
+    app = Explorer(graph=graph())
+    async with app.run_test() as pilot:
+        old_node = await app.reveal(["app.bst", "compiler.bst"])
+        await pilot.pause()
+        app.rebuild()
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.pause()
+        before = str(app.query_one("#details", Static).render())
+        # The name still exists and node IDs may be reused, but this occurrence
+        # belongs to the previous tree and must not populate or change details.
+        app.post_message(Tree.NodeExpanded(old_node))
+        app.post_message(Tree.NodeHighlighted(old_node))
+        await pilot.pause()
+        assert not old_node.children
+        assert str(app.query_one("#details", Static).render()) == before
+
+
+class FakeInspector:
+    def __init__(self, workspace=None, error=None):
+        self.calls = []
+        self.cancelled = False
+        self.workspace = workspace
+        self.error = error
+
+    def load(self, name, section):
+        self.calls.append((name, section))
+        if self.error:
+            raise ValueError(self.error)
+        return Inspection("literal [build] contents", self.workspace)
+
+    def cancel(self):
+        self.cancelled = True
+
+
+async def test_element_menu_and_inspection_preserve_graph():
+    inspector = FakeInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test(size=(50, 15)) as pilot:
+        tree = app.query_one(Tree)
+        root = tree.root.children[0]
+        tree.move_cursor(root)
+        await pilot.press("right", "m")
+        assert isinstance(app.screen, ElementMenu)
+        assert await pilot.click("#build")
+        await pilot.pause()
+        assert isinstance(app.screen, InspectionScreen)
+        assert app.screen.query_one(TextArea).text == "literal [build] contents"
+        assert inspector.calls == [("app.bst", "build")]
+        await pilot.press("s", "r", "j")
+        assert app.scope == "all"
+        assert app.reverse_root is None
+        await pilot.press("escape")
+        assert inspector.cancelled
+        assert tree.cursor_node is root
+        assert root.is_expanded
+        await pilot.press("a")
+        await pilot.pause()
+        assert inspector.calls[-1] == ("app.bst", "artifacts")
+
+
+async def test_snapshot_actions_explain_unavailability():
+    app = Explorer(graph=graph())
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        assert "Live project required" in str(app.query_one("#status", Static).render())
+        await pilot.press("m")
+        assert app.screen.query_one("#artifacts", Button).disabled
+        await pilot.press("escape")
+        assert not isinstance(app.screen, ElementMenu)
+
+
+async def test_menu_keyboard_focus_and_activation():
+    inspector = FakeInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test(size=(50, 15)) as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("m")
+        app.screen.query_one("#artifacts", Button).focus()
+        await pilot.press("tab")
+        assert app.focused is app.screen.query_one("#build", Button)
+        await pilot.press("shift+tab")
+        assert app.focused is app.screen.query_one("#artifacts", Button)
+        await pilot.press("tab", "enter")
+        await pilot.pause()
+        assert isinstance(app.screen, InspectionScreen)
+        assert inspector.calls == [("app.bst", "build")]
+
+
+async def test_inspection_error_keeps_tree_open():
+    app = Explorer(graph=graph(), inspector_factory=lambda: FakeInspector(error="Artifact not cached"))
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        assert "Artifact not cached" in app.screen.query_one(TextArea).text
+        await pilot.press("escape")
+        assert app.selected() == "app.bst"
+
+
+async def test_workspace_file_browser(tmp_path):
+    source = tmp_path / "main.c"
+    content = "int main() {}\n" * 100
+    source.write_text(content)
+    (tmp_path / "loop").symlink_to(tmp_path, target_is_directory=True)
+    app = Explorer(graph=graph(), inspector_factory=lambda: FakeInspector(workspace=tmp_path))
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("c")
+        await pilot.pause()
+        workspace = app.screen.query_one(WorkspaceTree)
+        await pilot.pause()
+        assert len(workspace.root.children) == 1
+        workspace.select_node(workspace.root.children[0])
+        await pilot.pause()
+        preview = app.screen.query_one(TextArea)
+        assert preview.text == content
+        await pilot.press("tab")
+        assert app.focused is preview
+        await pilot.press("pagedown")
+        assert preview.cursor_location[0] > 0
+        await pilot.press("shift+tab")
+        assert app.focused is workspace
+        await pilot.press("escape")
+        assert app.selected() == "app.bst"
+
+
+async def test_closing_inspection_cancels_pending_load():
+    import threading
+
+    started, cancelled = threading.Event(), threading.Event()
+
+    class SlowInspector:
+        def load(self, name, section):
+            started.set()
+            cancelled.wait(timeout=5)
+            return Inspection("late result")
+
+        def cancel(self):
+            cancelled.set()
+
+    app = Explorer(graph=graph(), inspector_factory=SlowInspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        assert started.is_set()
+        assert app.screen.query_one(TextArea).text == "Loading…"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert cancelled.is_set()
+        assert app.selected() == "app.bst"
+        assert "late result" not in str(app.query_one("#details", Static).render())
