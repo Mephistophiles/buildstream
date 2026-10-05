@@ -60,6 +60,12 @@ def test_live_buildstream(tmp_path, monkeypatch):
     inspector = ProjectInspector(project)
     assert "echo hello" in inspector.load("code.bst", "build").text
     assert inspector.load("code.bst", "sources").workspace is None
+    checkout = inspector.checkout_sources("code.bst")
+    checked_out_source = next(checkout.workspace.rglob("main.c"))
+    assert preview_file(checkout.workspace, checked_out_source) == "int main() {}\n"
+    inspector.cancel()
+    assert not checkout.workspace.parent.exists()
+    inspector = ProjectInspector(project)
     workspace = tmp_path / "workspace"
     inspector.execute(["workspace", "open", "--directory", str(workspace), "--", "code.bst"])
     result = inspector.load("code.bst", "sources")
@@ -72,5 +78,7 @@ def test_live_buildstream(tmp_path, monkeypatch):
     # requiring a Linux build sandbox, so this also exercises macOS installations.
     (elements / "import.bst").write_text("kind: import\nsources:\n- kind: local\n  path: source\n")
     inspector.execute(["build", "--", "import.bst"])
-    contents = inspector.load("import.bst", "artifacts").text
-    assert "main.c" in contents
+    contents = inspector.load("import.bst", "artifacts")
+    assert "main.c" in contents.text
+    assert [entry.path for entry in contents.artifacts] == ["main.c"]
+    assert "reg" in contents.artifacts[0].details

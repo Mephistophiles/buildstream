@@ -24,7 +24,7 @@ def test_live_inspection_commands(tmp_path):
     def run(args, **kwargs):
         calls.append(args)
         if "list-contents" in args:
-            output = "app.bst:\n  /usr/bin/app\n"
+            output = "app.bst:\n\t" + ("-rwxr-xr-x exe 42 " if "--long" in args else "") + "/usr/bin/app\n"
         elif "%{workspace-dirs}" in args:
             output = f"Workspace: {tmp_path}\n"
         else:
@@ -41,8 +41,8 @@ def test_live_inspection_commands(tmp_path):
         assert call[-2:] == ["--", "sub.bst:app.bst"]
         assert not {"checkout", "fetch", "pull", "track"}.intersection(call)
     assert calls[0][8:-2] == ["artifact", "list-contents", "--long"]
-    assert calls[1][8:12] == ["show", "--deps", "none", "--format"]
-    assert all(field in calls[1][12] for field in ("%{config}", "%{vars}", "%{env}"))
+    assert calls[2][8:12] == ["show", "--deps", "none", "--format"]
+    assert all(field in calls[2][12] for field in ("%{config}", "%{vars}", "%{env}"))
 
 
 def test_sources_without_workspace():
@@ -87,3 +87,62 @@ def test_external_symlink_is_not_previewed(tmp_path):
     link.symlink_to(outside)
     with pytest.raises(ValueError, match="outside"):
         preview_file(workspace, link)
+
+
+def test_artifact_names_and_metadata():
+    paths = ["usr", "usr/a [b] -> c", "link with spaces"]
+    rows = ["drwxr-xr-x dir 0 usr", "-rw-r--r-- reg 3 usr/a [b] -> c",
+            "lrwxrwxrwx link 0 link with spaces -> usr/a [b] -> c"]
+
+    def run(args, **kwargs):
+        output = "  app.bst:\n\t" + "\n\t".join(rows if "--long" in args else paths) + "\n"
+        return subprocess.CompletedProcess(args, 0, output)
+
+    result = ProjectInspector(run=run).load("app.bst", "artifacts")
+    assert [entry.path for entry in result.artifacts] == paths
+    assert [entry.directory for entry in result.artifacts] == [True, False, False]
+    assert result.artifacts[-1].details == rows[-1]
+
+
+def test_source_checkout_cleanup_and_command():
+    from pathlib import Path
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        path = Path(args[args.index("--directory") + 1])
+        path.mkdir()
+        (path / "hello.c").write_text("hello")
+        return subprocess.CompletedProcess(args, 0, "")
+
+    inspector = ProjectInspector("/project with spaces", [("arch", "aarch64")], run=run)
+    result = inspector.checkout_sources("junction.bst:code.bst")
+    assert preview_file(result.workspace, result.workspace / "hello.c") == "hello"
+    assert calls[0][-8:] == ["source", "checkout", "--deps", "none", "--directory",
+                            str(result.workspace), "--", "junction.bst:code.bst"]
+    assert "'" in result.text  # Shell-quoted project path in the reproducible command.
+    inspector.cancel()
+    assert not result.workspace.parent.exists()
+    inspector.cancel()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_failed_or_cancelled_checkout_removes_temporary_files(cancelled):
+    from pathlib import Path
+
+    checkout_paths = []
+
+    def run(args, **kwargs):
+        path = Path(args[args.index("--directory") + 1])
+        path.mkdir()
+        (path / "partial").write_text("partial checkout")
+        checkout_paths.append(path)
+        if cancelled:
+            inspector.cancel()
+        return subprocess.CompletedProcess(args, 0 if cancelled else 1, "")
+
+    inspector = ProjectInspector(run=run)
+    with pytest.raises(ValueError):
+        inspector.checkout_sources("code.bst")
+    assert not checkout_paths[0].parent.exists()

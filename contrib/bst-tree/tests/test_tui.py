@@ -16,8 +16,8 @@ from textual.widgets import Button, Input, Static, TextArea, Tree
 
 from bst_tree.model import Graph
 from bst_tree.tui import Explorer
-from bst_tree.inspection import Inspection
-from bst_tree.inspection_tui import ElementMenu, InspectionScreen, WorkspaceTree
+from bst_tree.inspection import ArtifactEntry, Inspection
+from bst_tree.inspection_tui import ArtifactTree, ElementMenu, InspectionScreen, WorkspaceTree
 from test_core import graph, node
 
 
@@ -310,3 +310,151 @@ async def test_closing_inspection_cancels_pending_load():
         assert cancelled.is_set()
         assert app.selected() == "app.bst"
         assert "late result" not in str(app.query_one("#details", Static).render())
+
+
+async def test_menu_visible_shortcuts_and_arrow_navigation():
+    inspector = FakeInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test(size=(50, 15)) as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("m")
+        for key, button in [("a", "artifacts"), ("b", "build"), ("c", "sources")]:
+            assert f" {key} " in app.screen.query_one(f"#{button}", Button).label.plain
+        app.screen.query_one("#artifacts", Button).focus()
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert inspector.calls == [("app.bst", "build")]
+
+
+async def test_artifact_arrow_selection_and_info():
+    class ArtifactInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Artifact overview", artifacts=[
+                ArtifactEntry("usr", "drwxr-xr-x dir 0 usr", True),
+                ArtifactEntry("usr/a [b]", "-rw-r--r-- reg 42 usr/a [b]"),
+                ArtifactEntry("usr/z", "-rwxr-xr-x exe 70 usr/z"),
+            ])
+
+    app = Explorer(graph=graph(), inspector_factory=ArtifactInspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        files = app.screen.query_one(ArtifactTree)
+        assert app.focused is files
+        files.move_cursor(files.root)
+        await pilot.press("down", "right", "down")
+        assert files.cursor_node.data.path == "usr/a [b]"
+        assert "42" in app.screen.query_one(TextArea).text
+        await pilot.press("down")
+        assert files.cursor_node.data.path == "usr/z"
+        assert "70" in app.screen.query_one(TextArea).text
+        await pilot.press("left")
+        assert files.cursor_node.data.path == "usr"
+        await pilot.press("i")
+        assert app.screen.query_one(TextArea).text == "Artifact overview"
+        await pilot.press("tab")
+        assert app.focused is app.screen.query_one(TextArea)
+        await pilot.press("escape")
+        assert app.selected() == "app.bst"
+
+
+async def test_source_checkout_action_and_information(tmp_path):
+    (tmp_path / "main.c").write_text("source text")
+
+    class SourceInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Source provenance", can_checkout=True)
+
+        def checkout_sources(self, name):
+            self.calls.append((name, "checkout"))
+            return Inspection("Temporary checkout", tmp_path)
+
+    inspector = SourceInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("c")
+        await pilot.pause()
+        assert app.screen.query_one("#load-sources", Button).display
+        await pilot.press("f")
+        await pilot.pause()
+        files = app.screen.query_one(WorkspaceTree)
+        await pilot.pause()
+        assert inspector.calls == [("app.bst", "checkout")]
+        assert not app.screen.query_one("#load-sources", Button).display
+        files.select_node(files.root.children[0])
+        await pilot.pause()
+        assert app.screen.query_one(TextArea).text == "source text"
+        await pilot.press("i")
+        assert "Source provenance" in app.screen.query_one(TextArea).text
+        assert "Temporary checkout" in app.screen.query_one(TextArea).text
+        await pilot.press("f")
+        assert len(inspector.calls) == 1
+        await pilot.press("escape")
+        assert inspector.cancelled
+
+
+async def test_source_checkout_error_can_retry(tmp_path):
+    class SourceInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Source provenance", can_checkout=True)
+
+        def checkout_sources(self, name):
+            self.calls.append(name)
+            if len(self.calls) == 1:
+                raise ValueError("Source remote unavailable")
+            return Inspection("Temporary checkout", tmp_path)
+
+    inspector = SourceInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("c")
+        await pilot.pause()
+        assert await pilot.click("#load-sources")
+        await pilot.pause()
+        assert "Source remote unavailable" in app.screen.query_one(TextArea).text
+        assert not app.screen.query_one("#load-sources", Button).disabled
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.screen.query_one(WorkspaceTree)
+        assert len(inspector.calls) == 2
+
+
+async def test_close_during_source_checkout():
+    import threading
+
+    started, cancelled, finished = threading.Event(), threading.Event(), threading.Event()
+
+    class SourceInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Source provenance", can_checkout=True)
+
+        def checkout_sources(self, name):
+            started.set()
+            cancelled.wait(timeout=5)
+            finished.set()
+            raise ValueError("Checkout cancelled")
+
+        def cancel(self):
+            cancelled.set()
+
+    app = Explorer(graph=graph(), inspector_factory=SourceInspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("c")
+        await pilot.pause()
+        await pilot.press("f")
+        await pilot.pause()
+        assert started.is_set()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert cancelled.is_set()
+        assert finished.is_set()
+        assert app.selected() == "app.bst"

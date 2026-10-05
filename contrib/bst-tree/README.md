@@ -33,22 +33,32 @@ from each applicable target, and `q` exits (cancelling a pending load).
 Children are materialized only when expanded. Shared dependencies may be explored
 under multiple parents. Reverse dependencies and paths refer to the selected scope.
 
-Select an element and press `m` for its action menu, or use these shortcuts:
+Select an element and press `m` for its action menu. Highlighted `a` / `b` / `c`
+keys and the menu footer show available actions; ↑/↓ and Enter also select an
+action. You can use these shortcuts directly from the graph:
 
-- `a`: list the locally cached artifact's files, with permissions and sizes
-  (`bst artifact list-contents --long`). Missing artifacts produce an error in
-  the viewer; no build or artifact pull is started.
+- `a`: browse the locally cached artifact's file tree with ↑/↓ and ←/→.
+  The selected file's full path, permissions, type, size, and symlink target are
+  shown in the adjacent pane (`bst artifact list-contents`, plain and `--long`).
+  Missing artifacts produce an error in the viewer; no build or artifact pull
+  is started. This view displays file metadata, not file contents.
 - `b`: show the resolved element configuration, including build commands where
   supported by its kind, plus variables and environment (`bst show`). These are
   the effective settings, rather than the original `.bst` YAML or a build log.
 - `c`: show source provenance and browse files directly in an existing workspace.
-  Without a workspace, only plugin-provided source information (including any
-  URLs/refs) is available. No source checkout, fetch, or temporary copy is made.
+  Without a workspace, press `f` or choose **Load source files** to create a
+  temporary `bst source checkout --deps none` and browse it. The source view
+  explains the operation and shows its command with the project's options.
+  BuildStream uses its source cache and fetches missing sources from configured
+  remotes or upstream. The temporary checkout is removed on close, cancellation,
+  or error; fetched sources remain in BuildStream's cache.
 
 The viewers load on demand without blocking navigation back to the tree. Escape
 or `q` closes a viewer and cancels its pending command, preserving tree expansion
-and selection. Use Tab to switch between workspace files and the text preview;
-arrow keys and Page Up/Down scroll the focused widget. Text is read-only, previews
+and selection. Use Tab/Shift+Tab to switch between files and the text pane;
+↑/↓ select files, ←/→ close/open directories, and Enter previews a source file.
+Page Up/Down scroll the focused widget. Press `i` to restore the source provenance
+or full artifact listing after inspecting a file. Text is read-only, previews
 are limited to 256 KiB, binary files are identified, and symlinks are not browsed.
 Workspace contents reflect current local edits, not necessarily the built artifact.
 Each reopened viewer queries the live project again using the same directory,
@@ -124,8 +134,10 @@ changes with `old`/`new`, and metadata changes.
 This tool uses documented `bst show` fields, not private BuildStream APIs. The
 installed BuildStream must support `name`, `kind`, `full-key`, `source-info`,
 `workspaced`, `build-deps`, and `runtime-deps`. Unsupported output fails explicitly.
-No build, track or fetch command is run. Project loading can still require junction
-sources and plugin configuration; cache queries may follow BuildStream settings.
+No build or track command is run. Source checkout runs only when requested with
+`f` or **Load source files**, and can fetch missing sources. Project loading can
+still require junction sources and plugin configuration; cache queries may follow
+BuildStream settings.
 
 Source comparison uses plugin-provided `source-info`; plugins do not necessarily
 expose exact refs. Empty provenance is stored as null (unavailable), which also
@@ -182,8 +194,12 @@ lazy expansion, cycles, and loading cancellation. Live CLI coverage is opt-in.
 `inspection.py` provides `ProjectInspector` and bounded workspace file previews.
 It uses the public CLI and has no dependency on Textual or private cache layouts.
 `inspection_tui.py` contains the element menu and an isolated inspection screen
-with a read-only text viewer and lazy workspace directory tree. Each screen owns
-its cancellable command runner; background results cannot update a closed screen.
+with a read-only text viewer, lazy source/workspace directory tree, and selectable
+artifact file tree. Temporary source checkouts use the public CLI rather than
+private CAS paths or mounts. Each screen owns its cancellable command runner;
+background results cannot update a closed screen. The checkout worker retains
+ownership of its temporary directory until the command finishes, so closing a
+screen cannot remove a directory while BuildStream is still writing it.
 `cli.py` supplies a factory for live projects, while snapshot browsing supplies
 none. The graph model and snapshot format are unchanged.
 

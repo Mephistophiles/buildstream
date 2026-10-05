@@ -16,22 +16,70 @@
 from dataclasses import dataclass
 from pathlib import Path
 import stat
+import shlex
+import tempfile
+import threading
 import subprocess
 
 from .adapter import command_base
 
 
 @dataclass
+class ArtifactEntry:
+    path: str
+    details: str
+    directory: bool = False
+
+
+@dataclass
 class Inspection:
     text: str
     workspace: Path | None = None
+    can_checkout: bool = False
+    artifacts: list[ArtifactEntry] | None = None
 
 
 class ProjectInspector:
     def __init__(self, directory=None, options=(), *, run=subprocess.run, cancel=None):
         self.base = command_base(directory, options)
         self.run = run
-        self.cancel = cancel or (lambda: None)
+        self._cancel = cancel or (lambda: None)
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self._checkout = None
+
+    def cancel(self):
+        with self._lock:
+            self._cancelled = True
+            checkout, self._checkout = self._checkout, None
+        self._cancel()
+        if checkout:
+            checkout.cleanup()
+
+    def checkout_command(self, name, directory):
+        return ["source", "checkout", "--deps", "none", "--directory", str(directory), "--", name]
+
+    def checkout_sources(self, name):
+        # Keep ownership in the worker until the command finishes. Closing the
+        # screen may cancel the subprocess, but must not race its filesystem writes.
+        checkout = tempfile.TemporaryDirectory(prefix="bst-tree-sources-")
+        try:
+            path = Path(checkout.name) / "sources"
+            command = self.checkout_command(name, path)
+            self.execute(command)
+            with self._lock:
+                if self._cancelled:
+                    raise ValueError("Loading cancelled")
+                self._checkout = checkout
+            return Inspection(
+                "Temporary source checkout (removed when this viewer closes).\n"
+                + shlex.join(self.base + command)
+                + "\n\nUse arrows to browse; Enter previews a file. Press i for source information.",
+                path,
+            )
+        except BaseException:
+            checkout.cleanup()
+            raise
 
     def execute(self, arguments):
         result = self.run(self.base + arguments, stdout=subprocess.PIPE, text=True, check=False)
@@ -47,7 +95,18 @@ class ProjectInspector:
 
     def load(self, name, section):
         if section == "artifacts":
-            return Inspection(self.execute(["artifact", "list-contents", "--long", "--", name]))
+            details = self.execute(["artifact", "list-contents", "--long", "--", name])
+            paths = self.execute(["artifact", "list-contents", "--", name])
+            # Use the plain listing for names: long output appends symlink
+            # targets, and filenames may themselves contain spaces or " -> ".
+            names = [line[1:] for line in paths.splitlines() if line.startswith("\t")]
+            rows = [line[1:] for line in details.splitlines() if line.startswith("\t")]
+            if names == ["This element has no associated artifacts"]:
+                names, rows = [], []
+            if len(names) != len(rows):
+                raise ValueError("Artifact listing changed while loading; reopen the viewer")
+            entries = [ArtifactEntry(path, row, row.startswith("d")) for path, row in zip(names, rows)]
+            return Inspection(details, artifacts=entries)
         if section == "build":
             return Inspection(self.show(name, "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}"))
         if section == "sources":
@@ -56,7 +115,11 @@ class ProjectInspector:
             if not workspace:
                 return Inspection(
                     "Source provenance (URLs/refs depend on the source plugin):\n" + provenance
-                    + "\nNo open workspace. Source files are not loaded. No checkout or fetch was run."
+                    + "\nNo open workspace. Press f (or Load source files) to browse a temporary checkout.\n"
+                    + "BuildStream uses cached sources or fetches missing sources from configured remotes/upstream.\n"
+                    + "The temporary copy is removed when this viewer closes.\n\nCommand:\n"
+                    + shlex.join(self.base + self.checkout_command(name, "<temporary-directory>")),
+                    can_checkout=True,
                 )
             prefix = "Workspace: "
             if not workspace.startswith(prefix):
