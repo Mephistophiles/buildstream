@@ -152,7 +152,6 @@ project.bstmc/bstmc://
         source-info.txt
         build-commands.txt
         artifact-list.txt
-        artifact-pull.txt    # F3: скачать артефакт из remotes
         sources.tar
         artifact.tar
   build/                     # build-зависимости целей и их runtime-замыкание
@@ -196,7 +195,6 @@ sdk.bst:base.bst:default/lib.bst
 | `source-info.txt` | F3: `bst show --format '%{source-info}'` |
 | `build-commands.txt` | F3: resolved config, variables и environment из `bst show` |
 | `artifact-list.txt` | F3: `bst artifact list-contents --long` |
-| `artifact-pull.txt` | F3: `bst artifact pull --deps none`, затем свежий список файлов |
 | `sources.tar` | Enter: `bst source checkout --deps none --tar …` |
 | `artifact.tar` | Enter: автоматический `bst artifact pull --deps none`, если артефакта нет в кеше, затем `bst artifact checkout --deps none --no-integrate --tar …` |
 
@@ -207,12 +205,10 @@ sdk.bst:base.bst:default/lib.bst
 
 При открытии `artifact.tar` отсутствующий артефакт скачивается автоматически.
 Если артефакт уже в локальном кеше, pull не запускается и remotes не требуются.
-Для явной загрузки также можно нажать F3 на `artifact-pull.txt`.
 Загружается только выбранный элемент, без зависимостей, из настроенных
-artifact remotes, с опциями текущего проекта. Результат содержит выполненную
-команду и свежий `list-contents`; затем можно открыть `artifact.tar`.
+artifact remotes, с опциями текущего проекта.
 При ошибке операция завершается с диагностикой, после чего её можно повторить.
-MC кеширует успешно открытый файл-действие: для повторной загрузки и обновления
+MC кеширует успешно открытые файлы: для обновления
 уже открытых `artifact-list.txt` / `artifact.tar` освободите VFS или перезапустите
 MC. Сам просмотр дерева зависимостей ничего не скачивает через `artifact pull`.
 
@@ -231,8 +227,8 @@ MC. Сам просмотр дерева зависимостей ничего �
 не поддерживаются. Не редактируйте вложенный tar: MC не сможет сохранить его
 в проект. Промежуточный экспорт удаляется после команды, вложенным архивом
 управляет временный VFS-кеш MC. При нормальном завершении MC очищает его.
-`artifact.tar` и `artifact-pull.txt` записывают скачанные артефакты в кеш BuildStream; они остаются
-там после закрытия MC.
+Открытие `artifact.tar` сохраняет скачанные артефакты в кеше BuildStream; они
+остаются там после закрытия MC.
 При отмене команды временный экспорт очищается; SIGKILL/аварийное завершение
 может оставить файлы в системном временном каталоге.
 
@@ -272,6 +268,7 @@ Enter на `sources.tar` и F3 для файла с пробелами в име
 Тестовое окружение пакета не содержало `bst-tree`, Textual или BuildStream;
 использовалась отдельная команда `bst` из PATH. Все 59 тестов прошли.
 В 0.3.0 дополнительно проверены вложенные папки зависимостей и F3 через ссылку
-в настоящем MC, а также `artifact-pull.txt` с локальным сервером и пустым кешем.
+в настоящем MC. Live-тест также проверяет автоматическую загрузку при открытии
+`artifact.tar` с локальным сервером и пустым кешем.
 Для live-тестов на macOS может потребоваться `ulimit -n 4096`;
 `buildbox-casd` доступен в Homebrew-пакете `recc`.

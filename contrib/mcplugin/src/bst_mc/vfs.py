@@ -22,7 +22,6 @@ import json
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -39,7 +38,6 @@ ACTIONS = (
     "source-info.txt",
     "build-commands.txt",
     "artifact-list.txt",
-    "artifact-pull.txt",
     "sources.tar",
     "artifact.tar",
     "paths.txt",
@@ -58,10 +56,6 @@ paths.txt shows one shortest path from each applicable target in this scope.
 F3: view source-info.txt, build-commands.txt, artifact-list.txt, element.json.
 Build commands are resolved configuration, variables and environment, not a log.
 artifact-list.txt runs bst artifact list-contents --long.
-F3 on artifact-pull.txt downloads this element with bst artifact pull --deps none
-and shows the updated listing. This explicitly writes to BuildStream's cache.
-MC caches the result: free/reopen this VFS to run the action again or refresh
-previously viewed artifact-list.txt / artifact.tar.
 
 Enter sources.tar: bst source checkout --deps none --tar ...
 Enter artifact.tar: pull if not cached, then
@@ -257,12 +251,6 @@ class Project:
                 content = self.inspector.show(name, "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}")
             elif action == "artifact-list.txt":
                 content = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
-            elif action == "artifact-pull.txt":
-                command = ["artifact", "pull", "--deps", "none", "--", name]
-                output = self.inspector.execute(command)
-                listing = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
-                content = "Artifact pull completed.\n" + shlex.join(self.inspector.base + command)
-                content += "\n\n" + output + listing
             else:
                 graph = self.graph.scoped(scope)
                 if name not in graph.nodes:

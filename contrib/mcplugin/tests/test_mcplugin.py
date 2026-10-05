@@ -126,7 +126,7 @@ def test_junction_paths_preserve_exact_names(name, path):
     assert vfs.element_name(path) == name
 
 
-def test_junction_navigation_links_and_pull(descriptor, graph, tmp_path):
+def test_junction_navigation_links_and_listing(descriptor, graph, tmp_path):
     names = ["sdk.bst:ports/base.bst:lib.bst", "sdk.bst::ports/base.bst:lib.bst",
              "sdk.bst/ports/base.bst/lib.bst", "sdk.bst [junction]/ports/base.bst/lib.bst"]
     graph = Graph(names, {name: next(iter(graph.nodes.values())) for name in names}, {
@@ -148,8 +148,8 @@ def test_junction_navigation_links_and_pull(descriptor, graph, tmp_path):
         assert f"all/targets/{vfs.element_path(name)}" in indexed
         project.copyout(f"all/elements/{vfs.element_path(name)}/element.json", tmp_path / "out")
         assert json.loads((tmp_path / "out").read_text())["name"] == name
-        project.copyout(f"all/elements/{vfs.element_path(name)}/artifact-pull.txt", tmp_path / "out")
-        assert calls[-2][-6:] == ["artifact", "pull", "--deps", "none", "--", name]
+        project.copyout(f"all/elements/{vfs.element_path(name)}/artifact-list.txt", tmp_path / "out")
+        assert calls[-1][-5:] == ["artifact", "list-contents", "--long", "--", name]
     for entry in entries:
         if entry.kind == "link":
             target = posixpath.normpath(posixpath.join(posixpath.dirname(entry.path), entry.target))
@@ -163,35 +163,6 @@ def test_junction_navigation_links_and_pull(descriptor, graph, tmp_path):
 def test_noncanonical_junction_paths_are_rejected(path):
     with pytest.raises(ValueError):
         vfs.element_name(path)
-
-
-@pytest.mark.parametrize("failed", [False, True])
-def test_explicit_artifact_pull(descriptor, tmp_path, failed):
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append(args)
-        return SimpleNamespace(returncode=1 if failed else 0, stdout="fresh artifact listing\n")
-
-    project = vfs.Project(descriptor, run=run)
-    output = tmp_path / "out"
-    output.write_text("previous contents")
-    member = "all/elements/default/element/fo/bar.bst/artifact-pull.txt"
-    if failed:
-        with pytest.raises(ValueError, match="bst failed"):
-            project.copyout(member, output)
-        assert output.read_text() == "previous contents"
-        assert len(calls) == 1
-    else:
-        project.copyout(member, output)
-        assert "Artifact pull completed" in output.read_text()
-        assert "fresh artifact listing" in output.read_text()
-        assert calls[1] == project.inspector.base + [
-            "artifact", "list-contents", "--long", "--", "default/element/fo/bar.bst"
-        ]
-    assert calls[0] == project.inspector.base + [
-        "artifact", "pull", "--deps", "none", "--", "default/element/fo/bar.bst"
-    ]
 
 
 @pytest.mark.parametrize("action,expected", [
@@ -448,13 +419,12 @@ def test_live_buildstream(tmp_path, monkeypatch):
             config.write_text(f"artifacts:\n  servers:\n  - url: {url}\n")
             with pytest.raises(ValueError):
                 project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
-            # Opening the archive must pull from the remote without the manual action.
+            # Opening the archive must pull the missing artifact from the remote.
             project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
             with tarfile.open(output) as stream:
                 member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
                 assert stream.extractfile(member).read() == b"Hello from MC!\n"
-            project.copyout("all/elements/default/element/fo/files.bst/artifact-pull.txt", output)
-            assert "Artifact pull completed" in output.read_text()
+            project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
             assert "hello world.txt" in output.read_text()
         finally:
             server.stop(0).wait()
