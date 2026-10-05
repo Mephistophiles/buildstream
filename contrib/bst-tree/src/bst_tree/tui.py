@@ -59,7 +59,7 @@ class Explorer(App):
         ("m", "menu", "Element"),
         Binding("a", "inspect('artifacts')", "Artifacts", show=False),
         Binding("b", "inspect('build')", "Build", show=False),
-        Binding("c", "inspect('sources')", "Sources", show=False),
+        Binding("s", "inspect('sources')", "Sources", show=False),
         Binding("space", "toggle", "Expand", show=False),
         Binding("h", "left", "Parent", show=False),
         Binding("l", "right", "Expand", show=False),
@@ -70,7 +70,7 @@ class Explorer(App):
         Binding("N", "next_match(-1)", "Previous", show=False),
         ("r", "reverse", "Reverse"),
         ("w", "why", "Why"),
-        ("s", "scope", "Scope"),
+        Binding("S", "scope", "Scope", key_display="Shift+S"),
         ("escape", "back", "Back"),
     ]
 

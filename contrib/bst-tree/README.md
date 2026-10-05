@@ -24,7 +24,7 @@ graph, even if you use a narrower scope in the UI.
 ## Navigation
 
 Arrow keys or `hjkl` navigate; Enter/Space toggle a branch. `/` searches all element
-names, including collapsed branches; `n`/`N` visit matches. `s` cycles all/run/build
+names, including collapsed branches; `n`/`N` visit matches. `Shift+S` cycles all/run/build
 scope. Build scope includes direct build dependencies and their runtime closure,
 with the target retained as a visual root. `r` shows reverse dependencies of the
 selected element, Escape restores the previous tree, `w` shows one shortest path
@@ -33,11 +33,12 @@ from each applicable target, and `q` exits (cancelling a pending load).
 Children are materialized only when expanded. Shared dependencies may be explored
 under multiple parents. Reverse dependencies and paths refer to the selected scope.
 
-Select an element and press `m` for its action menu. Highlighted `a` / `b` / `c`
+Select an element and press `m` for its action menu. Highlighted `a` / `b` / `s`
 keys and the menu footer show available actions; ↑/↓ and Enter also select an
 action. You can use these shortcuts directly from the graph:
 
-- `a`: browse the locally cached artifact's file tree with ↑/↓ and ←/→.
+- `a`: browse the locally cached artifact's file tree with arrow keys or `hjkl`.
+  Folders, file icons, highlighting, and sorting match the source browser.
   The selected file's full path, permissions, type, size, and symlink target are
   shown in the adjacent pane (`bst artifact list-contents`, plain and `--long`).
   Missing artifacts produce an error in the viewer; no build or artifact pull
@@ -45,7 +46,7 @@ action. You can use these shortcuts directly from the graph:
 - `b`: show the resolved element configuration, including build commands where
   supported by its kind, plus variables and environment (`bst show`). These are
   the effective settings, rather than the original `.bst` YAML or a build log.
-- `c`: show source provenance and browse files directly in an existing workspace.
+- `s`: show source provenance and browse files directly in an existing workspace.
   Without a workspace, press `f` or choose **Load source files** to create a
   temporary `bst source checkout --deps none` and browse it. The source view
   explains the operation and shows its command with the project's options.
@@ -56,7 +57,8 @@ action. You can use these shortcuts directly from the graph:
 The viewers load on demand without blocking navigation back to the tree. Escape
 or `q` closes a viewer and cancels its pending command, preserving tree expansion
 and selection. Use Tab/Shift+Tab to switch between files and the text pane;
-↑/↓ select files, ←/→ close/open directories, and Enter previews a source file.
+↑/↓ or `j`/`k` select files, ←/→ or `h`/`l` close/open directories, and Enter
+previews a source file.
 Page Up/Down scroll the focused widget. Press `i` to restore the source provenance
 or full artifact listing after inspecting a file. Text is read-only, previews
 are limited to 256 KiB, binary files are identified, and symlinks are not browsed.

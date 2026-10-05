@@ -11,6 +11,8 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import pytest
+from rich.style import Style
 from textual.events import Key
 from textual.widgets import Button, Input, Static, TextArea, Tree
 
@@ -43,7 +45,7 @@ async def test_navigation_search_reverse_and_scope():
         await pilot.press("escape")
         await pilot.pause()
         assert app.selected() == "bootstrap.bst"
-        await pilot.press("s")
+        await pilot.press("S")
         assert app.scope == "run"
         assert "compiler.bst" not in app.view.nodes
         await pilot.resize_terminal(50, 15)
@@ -140,7 +142,7 @@ async def test_queued_expand_and_scope_change():
         await pilot.pause()
         # Queue both keys before the expansion event reaches the application.
         app.post_message(Key("right", None))
-        app.post_message(Key("s", "s"))
+        app.post_message(Key("S", "S"))
         await pilot.pause()
         assert app.scope == "run"
         assert "compiler.bst" not in app.view.nodes
@@ -264,7 +266,7 @@ async def test_workspace_file_browser(tmp_path):
     async with app.run_test() as pilot:
         tree = app.query_one(Tree)
         tree.move_cursor(tree.root.children[0])
-        await pilot.press("c")
+        await pilot.press("s")
         await pilot.pause()
         workspace = app.screen.query_one(WorkspaceTree)
         await pilot.pause()
@@ -319,21 +321,30 @@ async def test_menu_visible_shortcuts_and_arrow_navigation():
         tree = app.query_one(Tree)
         tree.move_cursor(tree.root.children[0])
         await pilot.press("m")
-        for key, button in [("a", "artifacts"), ("b", "build"), ("c", "sources")]:
+        for key, button in [("a", "artifacts"), ("b", "build"), ("s", "sources")]:
             assert f" {key} " in app.screen.query_one(f"#{button}", Button).label.plain
         app.screen.query_one("#artifacts", Button).focus()
         await pilot.press("down", "enter")
         await pilot.pause()
         assert inspector.calls == [("app.bst", "build")]
+        await pilot.press("escape", "m", "s")
+        await pilot.pause()
+        assert inspector.calls[-1] == ("app.bst", "sources")
+        assert app.scope == "all"
 
 
-async def test_artifact_arrow_selection_and_info():
+@pytest.mark.parametrize("keys", [("down", "up", "left", "right"), ("j", "k", "h", "l")])
+async def test_artifact_file_navigation_and_info(keys):
+    down, up, left, right = keys
+
     class ArtifactInspector(FakeInspector):
         def load(self, name, section):
             return Inspection("Artifact overview", artifacts=[
+                ArtifactEntry("alpha", "-rw-r--r-- reg 0 alpha"),
+                ArtifactEntry("zdir", "drwxr-xr-x dir 0 zdir", True),
+                ArtifactEntry("usr/z", "-rwxr-xr-x exe 70 usr/z"),
                 ArtifactEntry("usr", "drwxr-xr-x dir 0 usr", True),
                 ArtifactEntry("usr/a [b]", "-rw-r--r-- reg 42 usr/a [b]"),
-                ArtifactEntry("usr/z", "-rwxr-xr-x exe 70 usr/z"),
             ])
 
     app = Explorer(graph=graph(), inspector_factory=ArtifactInspector)
@@ -344,21 +355,62 @@ async def test_artifact_arrow_selection_and_info():
         await pilot.pause()
         files = app.screen.query_one(ArtifactTree)
         assert app.focused is files
+        assert [str(node.label) for node in files.root.children] == ["usr", "zdir", "alpha"]
         files.move_cursor(files.root)
-        await pilot.press("down", "right", "down")
+        await pilot.press(down, right, down)
         assert files.cursor_node.data.path == "usr/a [b]"
+        label = files.render_label(files.cursor_node, Style(), Style())
+        assert label.plain == "📄 a [b]"
         assert "42" in app.screen.query_one(TextArea).text
-        await pilot.press("down")
+        await pilot.press(down)
         assert files.cursor_node.data.path == "usr/z"
         assert "70" in app.screen.query_one(TextArea).text
-        await pilot.press("left")
+        await pilot.press(up)
+        assert files.cursor_node.data.path == "usr/a [b]"
+        await pilot.press(left)
         assert files.cursor_node.data.path == "usr"
+        label = files.render_label(files.cursor_node, Style(), Style())
+        assert label.plain == "📂 usr"
+        await pilot.press(left)
+        assert not files.cursor_node.is_expanded
         await pilot.press("i")
         assert app.screen.query_one(TextArea).text == "Artifact overview"
         await pilot.press("tab")
         assert app.focused is app.screen.query_one(TextArea)
         await pilot.press("escape")
         assert app.selected() == "app.bst"
+
+
+async def test_source_vim_navigation_and_shortcut(tmp_path):
+    directory = tmp_path / "src"
+    directory.mkdir()
+    (directory / "a.c").write_text("source preview")
+    (directory / "b.c").write_text("other source")
+    app = Explorer(graph=graph(), inspector_factory=lambda: FakeInspector(workspace=tmp_path))
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("s")
+        await pilot.pause()
+        files = app.screen.query_one(WorkspaceTree)
+        await pilot.pause()
+        files.move_cursor(files.root)
+        await pilot.press("j", "l")
+        await pilot.pause()
+        await pilot.press("l")
+        assert files.cursor_node.data.path == directory / "a.c"
+        await pilot.press("j")
+        assert files.cursor_node.data.path == directory / "b.c"
+        await pilot.press("k", "enter")
+        await pilot.pause()
+        assert app.screen.query_one(TextArea).text == "source preview"
+        await pilot.press("h")
+        assert files.cursor_node.data.path == directory
+        await pilot.press("h")
+        assert not files.cursor_node.is_expanded
+        assert app.scope == "all"
+        await pilot.press("escape", "S")
+        assert app.scope == "run"
 
 
 async def test_source_checkout_action_and_information(tmp_path):
@@ -377,7 +429,7 @@ async def test_source_checkout_action_and_information(tmp_path):
     async with app.run_test() as pilot:
         tree = app.query_one(Tree)
         tree.move_cursor(tree.root.children[0])
-        await pilot.press("c")
+        await pilot.press("s")
         await pilot.pause()
         assert app.screen.query_one("#load-sources", Button).display
         await pilot.press("f")
@@ -414,7 +466,7 @@ async def test_source_checkout_error_can_retry(tmp_path):
     async with app.run_test() as pilot:
         tree = app.query_one(Tree)
         tree.move_cursor(tree.root.children[0])
-        await pilot.press("c")
+        await pilot.press("s")
         await pilot.pause()
         assert await pilot.click("#load-sources")
         await pilot.pause()
@@ -448,7 +500,7 @@ async def test_close_during_source_checkout():
     async with app.run_test() as pilot:
         tree = app.query_one(Tree)
         tree.move_cursor(tree.root.children[0])
-        await pilot.press("c")
+        await pilot.press("s")
         await pilot.pause()
         await pilot.press("f")
         await pilot.pause()

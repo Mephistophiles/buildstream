@@ -32,7 +32,7 @@ class ElementMenu(ModalScreen):
         ("escape", "dismiss", "Close"),
         ("a", "choose('artifacts')", "Artifacts"),
         ("b", "choose('build')", "Build"),
-        ("c", "choose('sources')", "Sources"),
+        ("s", "choose('sources')", "Sources"),
         Binding("up", "app.focus_previous", "Previous", show=False, priority=True),
         Binding("down", "app.focus_next", "Next", show=False, priority=True),
     ]
@@ -53,13 +53,13 @@ class ElementMenu(ModalScreen):
     def compose(self) -> ComposeResult:
         with VerticalScroll():
             yield Static(self.name_label, markup=False)
-            yield Static("Press a / b / c, or ↑↓ then Enter", markup=False)
+            yield Static("Press a / b / s, or ↑↓ then Enter", markup=False)
             if not self.available:
                 yield Static("Live project required; snapshots contain graph metadata only.")
             for key, label, section in (
                 ("a", "Artifacts", "artifacts"),
                 ("b", "Build instructions", "build"),
-                ("c", "Sources / workspace", "sources"),
+                ("s", "Sources / workspace", "sources"),
             ):
                 yield Button(
                     Text.from_markup(f"[bold reverse] {key} [/bold reverse]  {label}"),
@@ -100,6 +100,10 @@ class FileNavigation:
 FILE_BINDINGS = [
     Binding("right", "open_directory", "Open directory", show=False),
     Binding("left", "parent_directory", "Parent", show=False),
+    Binding("l", "open_directory", "Open directory", show=False),
+    Binding("h", "parent_directory", "Parent", show=False),
+    Binding("j", "cursor_down", "Down", show=False),
+    Binding("k", "cursor_up", "Up", show=False),
 ]
 
 
@@ -113,19 +117,36 @@ class WorkspaceTree(FileNavigation, DirectoryTree):
 
 class ArtifactTree(FileNavigation, Tree):
     BINDINGS = FILE_BINDINGS
+    # Reuse DirectoryTree's presentation without its filesystem loading: the
+    # artifact listing is virtual, and may include symlinks or uncopied files.
+    COMPONENT_CLASSES = DirectoryTree.COMPONENT_CLASSES
+    DEFAULT_CSS = DirectoryTree.DEFAULT_CSS.replace("DirectoryTree", "ArtifactTree")
+    ICON_NODE = DirectoryTree.ICON_NODE
+    ICON_NODE_EXPANDED = DirectoryTree.ICON_NODE_EXPANDED
+    ICON_FILE = DirectoryTree.ICON_FILE
+    render_label = DirectoryTree.render_label
 
     def __init__(self, entries):
         super().__init__("Artifact files", id="artifact-files")
-        nodes = {(): self.root}
+        paths = {}
         for entry in entries:
             parts = PurePosixPath(entry.path).parts
-            for index, part in enumerate(parts):
-                key = parts[: index + 1]
-                if key not in nodes:
-                    nodes[key] = nodes[key[:-1]].add(Text(part), allow_expand=True)
-                if index == len(parts) - 1:
-                    nodes[key].data = entry
-                    nodes[key].allow_expand = entry.directory
+            for length in range(1, len(parts)):
+                paths.setdefault(parts[:length], None)
+            if parts:
+                paths[parts] = entry
+
+        def is_directory(parts):
+            entry = paths[parts]
+            return entry is None or entry.directory
+
+        # Parents first; within each directory, folders precede files and names
+        # are sorted case-insensitively, just as in DirectoryTree.
+        nodes = {(): self.root}
+        for parts in sorted(paths, key=lambda p: (len(p), p[:-1], not is_directory(p), p[-1].lower())):
+            nodes[parts] = nodes[parts[:-1]].add(
+                Text(parts[-1]), data=paths[parts], allow_expand=is_directory(parts)
+            )
         self.root.expand()
 
 
@@ -163,7 +184,7 @@ class InspectionScreen(ModalScreen):
         yield Static(f"{self.element_name} — {self.section}", id="inspection-title", markup=False)
         help_text = "↑↓ / PgUp / PgDn: scroll"
         if self.section != "build":
-            help_text = "Tab: switch pane · ↑↓: select · ←→: folders · i: info"
+            help_text = "Tab: switch pane · ↑↓/jk: select · ←→/hl: folders · i: info"
         if self.section == "sources":
             help_text += " · Enter: preview"
         yield Static(help_text, id="inspection-help", markup=False)
