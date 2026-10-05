@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 from bst_mc import cli, vfs
-from bst_tree.model import Graph
+from bst_mc._graph import Graph
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])
@@ -176,6 +176,7 @@ def test_read_only(command, capsys):
 
 
 def test_protocol_and_cli(tmp_path, descriptor, graph, monkeypatch, capsys):
+    (tmp_path / "project.conf").write_text("name: test\n")
     bookmark = tmp_path / "project.bstmc"
     assert cli.main(["-C", str(tmp_path), "--option", "arch", "aarch64", "-o", str(bookmark), "app.bst"]) == 0
     assert json.loads(bookmark.read_text()) == descriptor
@@ -207,6 +208,9 @@ def test_failed_listing_emits_no_partial_archive(tmp_path, descriptor, monkeypat
 
 def test_temporary_launcher_cleanup(tmp_path, monkeypatch):
     paths = []
+    (tmp_path / "project.conf").write_text("name: test\n")
+    monkeypatch.setattr(cli, "check_helper", lambda: tmp_path / "bstmc")
+    monkeypatch.setattr(cli, "check_project", lambda *args: None)
 
     def launch(args):
         assert args[0] == "mc"

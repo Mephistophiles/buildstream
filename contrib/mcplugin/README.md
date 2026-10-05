@@ -1,48 +1,91 @@
 # bst-mc: BuildStream в Midnight Commander
 
-Плагин extfs открывает BuildStream-проект как виртуальную файловую систему MC.
-Требуются Python 3.10+, MC с extfs/tarfs, установленный `bst` и плагины проекта.
-Граф и инспекция используют публичный CLI BuildStream и код соседнего `bst-tree`.
+Плагин открывает BuildStream-проект в MC как виртуальные каталоги: зависимости,
+исходники, артефакты и команды сборки. Требуются Python 3.10+, MC с поддержкой
+extfs и работающий `bst` в `PATH`, вместе с плагинами вашего проекта.
+`bst-tree` и Textual **не нужны**. `bst-mc` устанавливается отдельно через pipx.
 
-## Установка
+## Быстрый старт через pipx
 
-Из корня этого репозитория, в окружении, где уже работает ваш `bst`:
+Из корня этого репозитория:
 
 ```sh
-python -m pip install ./contrib/bst-tree ./contrib/mcplugin
-
-# Установка extfs для текущего пользователя, без sudo:
-mc_data="${XDG_DATA_HOME:-$HOME/.local/share}/mc"
-mkdir -p "$mc_data/extfs.d"
-ln -s "$(command -v bstmc)" "$mc_data/extfs.d/bstmc"
+pipx install ./contrib/mcplugin
+bst-mc --install-mc
+bst-mc /path/to/bst-project element.bst
 ```
 
-Если используется virtualenv, активируйте его перед установкой и запуском MC.
-Ссылка ведёт на entry point с Python этого окружения; `bst` должен оставаться
-доступен в `PATH`. `ln` намеренно не заменяет уже существующий плагин.
-Пути конкретной сборки MC можно проверить командой `mc --datadir-info`.
-После установки перезапустите MC.
+`pipx install` создаёт изолированное окружение Python и команды `bst-mc` и
+`bstmc`. Он сам по себе **не регистрирует extfs в MC**: для этого нужен второй
+шаг, `bst-mc --install-mc`. Эта команда узнаёт пользовательский каталог
+`extfs.d` у вашей сборки MC и записывает туда исполняемый launcher, привязанный
+к Python установленного пакета. Sudo и глобальный `pip install` не нужны.
+Повторный `--install-mc` обновляет launcher; чужой файл не перезаписывается.
+Уже запущенный MC после установки нужно закрыть и открыть снова.
 
-Открыть проект сразу в новой сессии MC:
+Если shell не находит `bst-mc`, выполните `pipx ensurepath` и откройте новый
+терминал. Если `bst` уже работает, переустанавливать его не требуется.
+Иначе его тоже можно поставить отдельно:
 
 ```sh
+pipx install buildstream
+bst --version
+mc --version
+```
+
+Плагины BuildStream устанавливайте в окружение **самого `bst`**, например
+через `pipx inject buildstream ИМЯ-ПАКЕТА-ПЛАГИНА`, если BuildStream установлен
+через pipx. `bst-mc` вызывает внешний `bst`, а не импортирует его Python-модули.
+Если ваш `bst` находится в virtualenv, активируйте это окружение перед запуском.
+
+Обновить уже установленный плагин из изменённой локальной папки:
+
+```sh
+pipx install --force ./contrib/mcplugin
+bst-mc --install-mc
+```
+
+Начиная с 0.2.0, пакет не требует `bst-tree` из PyPI. Для проверки версии:
+`bst-mc --version`.
+
+## Открытие проекта
+
+Оба варианта равнозначны:
+
+```sh
+bst-mc /path/to/project app.bst
 bst-mc -C /path/to/project app.bst
-bst-mc -C /path/to/project --option arch x86-64 app.bst tools.bst
+```
+
+Первый позиционный аргумент считается директорией проекта, если это
+существующий каталог и `-C` не указан. Из самого проекта можно просто выполнить
+`bst-mc app.bst`. Поддерживаются несколько целей, junction-имена и опции:
+
+```sh
+bst-mc -C /path/to/project --option arch x86-64 app.bst sdk.bst:tools.bst
+bst-mc /path/to/project
 ```
 
 Без списка элементов используются цели проекта по умолчанию, определяемые
-`bst show`. Поддерживаются junction-имена (`sdk.bst:app.bst`). Все запросы
-выполняются в strict mode с указанными опциями проекта.
+`bst show`. Все запросы выполняются в strict mode с указанными опциями проекта.
+До открытия MC launcher проверяет регистрацию плагина и загрузку графа. Ошибка
+проекта или установки выводится в терминал, MC при этом не запускается.
 
-Для открытия из уже запущенного MC создайте постоянную закладку:
+Успешный запуск показывает в панели **`all/`, `build/`, `run/`, `README.txt`**.
+Зайдите в `all/targets/`, затем в элемент и `dependencies/`.
+
+## Открытие из уже запущенного MC
+
+Создайте постоянную закладку:
 
 ```sh
-bst-mc -C /path/to/project app.bst -o ~/project.bstmc
+bst-mc /path/to/project app.bst -o ~/project.bstmc
 ```
 
 В командной строке MC выполните `cd ~/project.bstmc/bstmc://`.
 Закладка — JSON с абсолютным путём проекта, целями и опциями, а не снимок графа.
-Существующий файл команда не перезаписывает.
+Существующий файл команда не перезаписывает. Создание закладки не требует MC
+и не загружает граф, но для её открытия нужен `bst-mc --install-mc`.
 
 Чтобы открывать `.bstmc` клавишей Enter, через меню MC **Command → Edit extension
 file** откройте пользовательский `mc.ext.ini` и добавьте секцию из
@@ -63,6 +106,34 @@ shell/.bstmc
 
 Ассоциация нужна только для Enter на закладке; `bst-mc` и прямой `cd` работают
 без неё. Архивы `.tar` внутри проекта открываются стандартной ассоциацией MC.
+
+## Если не открывается
+
+- **pipx ищет `bst-tree` и не находит.** Устанавливается старая версия папки.
+  Обновите исходники и повторите `pipx install --force ./contrib/mcplugin`.
+- **Открываются обычные панели MC.** В 0.1.0 запуск не проверял регистрацию
+  extfs, а путь проекта без `-C` принимал за имя элемента. Обновитесь до 0.2.0,
+  выполните `bst-mc --install-mc` и перезапустите MC. Теперь обе формы запуска
+  поддерживаются, а ошибки обнаруживаются до открытия панелей.
+- **`MC helper is missing`, `broken or outdated`.** Выполните
+  `bst-mc --install-mc` из нужной установки pipx. Если installer сообщает о
+  неизвестном файле, сначала переместите указанный файл в резервную копию.
+  `mc --datadir-info` показывает фактический пользовательский `extfs.d`.
+- **`bst is not on PATH` или ошибка загрузки проекта.** Проверьте
+  `command -v bst` и `bst -C /path/to/project show element.bst` в том же
+  терминале. Ошибки плагинов/опций проекта должны быть устранены в окружении bst.
+- **В MC открывается JSON закладки.** Добавьте ассоциацию `.bstmc`, описанную
+  выше, либо используйте прямой `cd .../project.bstmc/bstmc://`.
+
+Диагностика без открытия интерфейса MC:
+
+```sh
+bst-mc /path/to/project app.bst -o /tmp/debug-project.bstmc
+bstmc list /tmp/debug-project.bstmc
+```
+
+Успешный `list` печатает каталоги и файлы в формате extfs. При ошибке он
+выводит диагностику `bst` и возвращает ненулевой статус.
 
 ## Навигация
 
@@ -139,7 +210,9 @@ MC кеширует листинг и уже открытые файлы; раз
 ## Проверка
 
 ```sh
-python -m pip install -e './contrib/mcplugin[test]' -e ./contrib/bst-tree
+python3 -m venv /tmp/bst-mc-dev
+source /tmp/bst-mc-dev/bin/activate
+python -m pip install -e './contrib/mcplugin[test]'
 python -m pytest -c contrib/mcplugin/pyproject.toml contrib/mcplugin/tests
 # Интеграция с настоящим bst/buildbox-casd:
 BST_MC_TEST_LIVE=1 python -m pytest -c contrib/mcplugin/pyproject.toml contrib/mcplugin/tests
@@ -149,10 +222,18 @@ bstmc list ~/project.bstmc
 bstmc copyout ~/project.bstmc all/elements/app.bst/build-commands.txt /tmp/commands.txt
 ```
 
+Модули `_bst.py` и `_graph.py` адаптированы из `bst-tree` и входят в пакет;
+установка не читает соседние каталоги репозитория.
+
 Протокол: [официальный README extfs MC](https://github.com/MidnightCommander/mc/blob/master/src/vfs/extfs/helpers/README).
 
 Проверено с MC 4.8.33, BuildStream 2.8.0 и Python 3.14 на macOS ARM64:
 переходы через `targets/` и `dependencies/`, F3 для build commands,
 Enter на `sources.tar` и F3 для файла с пробелами в имени.
+Версия 0.2.0 также проверена через чистые `pipx install` и
+`pipx install --force`: установка extfs через `--install-mc` и запуск
+`bst-mc /path/to/project app.bst` открывают каталоги проекта в MC.
+Тестовое окружение пакета не содержало `bst-tree`, Textual или BuildStream;
+использовалась отдельная команда `bst` из PATH. Все 59 тестов прошли.
 Для live-тестов на macOS может потребоваться `ulimit -n 4096`;
 `buildbox-casd` доступен в Homebrew-пакете `recc`.

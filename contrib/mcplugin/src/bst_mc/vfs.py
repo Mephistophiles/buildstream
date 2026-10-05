@@ -26,8 +26,8 @@ import sys
 import tempfile
 from urllib.parse import quote, unquote
 
-from bst_tree.adapter import capture
-from bst_tree.inspection import ProjectInspector
+from . import __version__
+from ._bst import capture, Inspector
 
 
 SCOPES = ("all", "build", "run")
@@ -119,7 +119,7 @@ class Project:
             raise ValueError("Bookmark options must be [name, value] pairs")
         self.directory, self.targets, self.options = directory, targets, options
         self.run = run
-        self.inspector = ProjectInspector(directory, options, run=run)
+        self.inspector = Inspector(directory, options, run=run)
         self._graph = None
 
     @property
@@ -195,7 +195,7 @@ class Project:
             if action == "source-info.txt":
                 content = self.inspector.show(name, "%{source-info}")
             elif action == "build-commands.txt":
-                content = self.inspector.load(name, "build").text
+                content = self.inspector.show(name, "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}")
             elif action == "artifact-list.txt":
                 content = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
             else:
@@ -224,6 +224,9 @@ class Project:
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args == ["--version"]:
+        print(f"bst-mc {__version__}")
+        return 0
     try:
         if not args or args[0] not in ("list", "copyout"):
             raise ValueError("Read-only VFS: only list and copyout are supported")
@@ -241,3 +244,7 @@ def main(argv=None):
         return 1
     except KeyboardInterrupt:
         return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

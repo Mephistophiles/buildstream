@@ -18,23 +18,49 @@ import subprocess
 import sys
 import tempfile
 
+from . import __version__
+from .integration import check_helper, check_project, install_helper
+
+
+def project_arguments(directory, targets):
+    targets = list(targets)
+    if directory is None and targets and Path(targets[0]).is_dir():
+        directory = targets.pop(0)
+    path = Path(directory or ".").resolve()
+    if not path.is_dir():
+        raise ValueError(f"Project directory does not exist: {path}")
+    if not any((parent / "project.conf").is_file() for parent in (path, *path.parents)):
+        raise ValueError(f"No project.conf found at or above {path}; use bst-mc /path/to/project element.bst")
+    return path, targets
+
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-C", "--directory", default=".", help="BuildStream project directory")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Examples: bst-mc /path/to/project app.bst; bst-mc -C /path/to/project app.bst",
+    )
+    parser.add_argument("--version", action="version", version=f"bst-mc {__version__}")
+    parser.add_argument("--install-mc", action="store_true", help="Register the extfs helper for your MC user")
+    parser.add_argument("-C", "--directory", help="BuildStream project directory")
     parser.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"))
     parser.add_argument("-o", "--output", type=Path, help="Write a .bstmc bookmark instead of starting MC")
-    parser.add_argument("targets", nargs="*", help="Elements (defaults to the project's default targets)")
-    args = parser.parse_args(argv)
-    descriptor = {
-        "format_version": 1,
-        "directory": str(Path(args.directory).resolve()),
-        "targets": args.targets,
-        "options": args.option,
-    }
+    parser.add_argument("targets", nargs="*", metavar="PROJECT_OR_ELEMENT",
+                        help="Optional project directory, then elements (defaults to the project's default targets)")
+    args = parser.parse_intermixed_args(argv)
+    if args.install_mc and (args.directory or args.targets or args.option or args.output):
+        parser.error("--install-mc cannot be combined with project arguments")
     try:
-        if not Path(descriptor["directory"]).is_dir():
-            raise ValueError("Project directory does not exist")
+        if args.install_mc:
+            path = install_helper()
+            print(f"Installed MC helper: {path}\nRestart any running MC sessions.")
+            return 0
+        directory, targets = project_arguments(args.directory, args.targets)
+        descriptor = {
+            "format_version": 1,
+            "directory": str(directory),
+            "targets": targets,
+            "options": args.option,
+        }
         content = json.dumps(descriptor, ensure_ascii=False, indent=2) + "\n"
         if args.output:
             # Bookmarks are user files; do not silently replace an existing one.
@@ -42,9 +68,11 @@ def main(argv=None):
                 stream.write(content)
             print(args.output.resolve())
             return 0
+        helper = check_helper()
         with tempfile.TemporaryDirectory(prefix="bst-mc-") as temporary:
             bookmark = Path(temporary) / "project.bstmc"
             bookmark.write_text(content, encoding="utf-8")
+            check_project(helper, bookmark)
             return subprocess.call(["mc", str(bookmark) + "/bstmc://"])
     except (OSError, ValueError) as error:
         print(f"bst-mc: {error}", file=sys.stderr)
