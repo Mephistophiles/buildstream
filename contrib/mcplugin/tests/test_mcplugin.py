@@ -60,7 +60,7 @@ def test_finite_graph_navigation_and_scopes(descriptor, graph):
     project._graph = graph
     entries = {entry.path: entry for entry in project.entries()}
     assert "run/elements/compiler.bst" not in entries
-    assert "build/elements/sdk.bst%3Abase%2Flib.bst" not in entries
+    assert "build/elements/sdk.bst%3Abase/lib.bst" not in entries
     assert "build/elements/shared.bst" in entries
     for entry in entries.values():
         if entry.kind == "link":
@@ -83,6 +83,64 @@ def test_list_does_not_inspect_or_export(descriptor, graph, monkeypatch):
     assert calls[0] == (["app.bst"], descriptor["directory"], [["arch", "aarch64"]])
 
 
+def test_nested_element_directories_and_relative_links(descriptor, graph):
+    names = ["default/element/fo/bar.bst", "default/element/fo/baz.bst", "other/bar.bst",
+             "sdk.bst:base/dir with spaces/lib.bst"]
+    graph = Graph(names[:2], {name: next(iter(graph.nodes.values())) for name in names}, {
+        (names[0], names[2]): frozenset({"build", "run"}),
+        (names[0], names[3]): frozenset({"run"}),
+        (names[1], names[2]): frozenset({"run"}),
+    }, {})
+    project = vfs.Project(descriptor)
+    project._graph = graph
+    entries = list(project.entries())
+    indexed = {entry.path: entry for entry in entries}
+    assert len(indexed) == len(entries)
+    assert "all/elements/default/element/fo/bar.bst" in indexed
+    assert "all/targets/default/element/fo/bar.bst" in indexed
+    assert "all/elements/default/element/fo/bar.bst/dependencies/other/bar.bst [build+run]" in indexed
+    assert "all/elements/other/bar.bst/reverse-dependencies/default/element/fo/baz.bst [run]" in indexed
+    assert "all/elements/sdk.bst%3Abase/dir%20with%20spaces/lib.bst" in indexed
+    seen = set()
+    for entry in entries:
+        assert "%2F" not in entry.path
+        parent = posixpath.dirname(entry.path)
+        assert not parent or parent in seen
+        if entry.kind == "link":
+            target = posixpath.normpath(posixpath.join(parent, entry.target))
+            assert indexed[target].kind == "dir"
+        seen.add(entry.path)
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_explicit_artifact_pull(descriptor, tmp_path, failed):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=1 if failed else 0, stdout="fresh artifact listing\n")
+
+    project = vfs.Project(descriptor, run=run)
+    output = tmp_path / "out"
+    output.write_text("previous contents")
+    member = "all/elements/default/element/fo/bar.bst/artifact-pull.txt"
+    if failed:
+        with pytest.raises(ValueError, match="bst failed"):
+            project.copyout(member, output)
+        assert output.read_text() == "previous contents"
+        assert len(calls) == 1
+    else:
+        project.copyout(member, output)
+        assert "Artifact pull completed" in output.read_text()
+        assert "fresh artifact listing" in output.read_text()
+        assert calls[1] == project.inspector.base + [
+            "artifact", "list-contents", "--long", "--", "default/element/fo/bar.bst"
+        ]
+    assert calls[0] == project.inspector.base + [
+        "artifact", "pull", "--deps", "none", "--", "default/element/fo/bar.bst"
+    ]
+
+
 @pytest.mark.parametrize("action,expected", [
     ("source-info.txt", ["show", "--deps", "none", "--format", "%{source-info}", "--", "sdk.bst:base/lib.bst"]),
     ("build-commands.txt", ["show", "--deps", "none", "--format",
@@ -99,7 +157,7 @@ def test_lazy_inspection_commands(descriptor, tmp_path, action, expected):
 
     project = vfs.Project(descriptor, run=run)
     output = tmp_path / "out"
-    project.copyout("all/elements/sdk.bst%3Abase%2Flib.bst/" + action, output)
+    project.copyout("all/elements/sdk.bst%3Abase/lib.bst/" + action, output)
     assert output.read_text() == "file contents\n"
     assert calls == [["bst", "--no-colors", "--strict", "-C", descriptor["directory"],
                       "--option", "arch", "aarch64", *expected]]
@@ -155,7 +213,9 @@ def test_paths_and_metadata(descriptor, graph, tmp_path):
 
 
 @pytest.mark.parametrize("member", ["../etc/passwd", "/README.txt", "all/elements/app.bst/../../x",
-                                    "all/elements/app.bst/unknown", "all/elements/a%2fb/source-info.txt"])
+                                    "all/elements/app.bst/unknown", "all/elements/a%2fb/source-info.txt",
+                                    "all/elements/a%2Fb/source-info.txt",
+                                    "all/elements/%2E%2E/app.bst/source-info.txt"])
 def test_invalid_members(descriptor, tmp_path, member):
     project = vfs.Project(descriptor, run=lambda *a, **kw: pytest.fail("Invalid member reached bst"))
     with pytest.raises(ValueError):
@@ -230,13 +290,13 @@ def test_live_buildstream(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     project_dir = tmp_path / "project with spaces"
     elements = project_dir / "elements"
-    elements.mkdir(parents=True)
+    (elements / "default/element/fo").mkdir(parents=True)
     (project_dir / "project.conf").write_text(
         "name: mc-test\nmin-version: '2.0'\nelement-path: elements\n"
         "defaults:\n  targets: [app.bst]\nsandbox:\n  build-os: linux\n  build-arch: aarch64\n"
     )
-    (elements / "app.bst").write_text("kind: manual\ndepends: [files.bst]\nconfig:\n  build-commands: [echo hello]\n")
-    (elements / "files.bst").write_text("kind: import\nsources:\n- kind: local\n  path: source\n")
+    (elements / "app.bst").write_text("kind: manual\ndepends: [default/element/fo/files.bst]\nconfig:\n  build-commands: [echo hello]\n")
+    (elements / "default/element/fo/files.bst").write_text("kind: import\nsources:\n- kind: local\n  path: source\n")
     source = project_dir / "source"
     source.mkdir()
     (source / "hello world.txt").write_text("Hello from MC!\n")
@@ -248,21 +308,49 @@ def test_live_buildstream(tmp_path, monkeypatch):
     output = tmp_path / "out"
     project.copyout("all/elements/app.bst/build-commands.txt", output)
     assert "echo hello" in output.read_text()
-    project.copyout("all/elements/files.bst/source-info.txt", output)
+    project.copyout("all/elements/default/element/fo/files.bst/source-info.txt", output)
     assert output.read_text().strip()
-    project.copyout("all/elements/files.bst/sources.tar", output)
+    project.copyout("all/elements/default/element/fo/files.bst/sources.tar", output)
     with tarfile.open(output) as stream:
         member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
         assert stream.extractfile(member).read() == b"Hello from MC!\n"
     with pytest.raises(ValueError):
-        project.copyout("all/elements/files.bst/artifact.tar", output)
-    project.inspector.execute(["build", "--", "files.bst"])
-    project.copyout("all/elements/files.bst/artifact-list.txt", output)
+        project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
+    project.inspector.execute(["build", "--", "default/element/fo/files.bst"])
+    project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
     assert "hello world.txt" in output.read_text()
-    project.copyout("all/elements/files.bst/artifact.tar", output)
+    project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
     with tarfile.open(output) as stream:
         member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
         assert stream.extractfile(member).read() == b"Hello from MC!\n"
         binary = next(item for item in stream.getmembers() if item.name.endswith("binary"))
         assert stream.extractfile(binary).read() == b"\x00\xff\x01"
         assert any(item.issym() for item in stream.getmembers())
+
+    # Only the test server uses an internal API; the plugin still invokes bst.
+    from buildstream._cas.casserver import create_server
+
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    with create_server(str(remote), enable_push=True, quota=None, index_only=False) as server:
+        port = server.add_insecure_port("127.0.0.1:0")
+        server.start()
+        try:
+            url = f"http://127.0.0.1:{port}"
+            project.inspector.execute(["artifact", "push", "--artifact-remote", url, "--",
+                                       "default/element/fo/files.bst"])
+            monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "fresh-cache"))
+            config = tmp_path / "config" / "buildstream.conf"
+            config.parent.mkdir(exist_ok=True)
+            config.write_text(f"artifacts:\n  servers:\n  - url: {url}\n")
+            with pytest.raises(ValueError):
+                project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
+            project.copyout("all/elements/default/element/fo/files.bst/artifact-pull.txt", output)
+            assert "Artifact pull completed" in output.read_text()
+            assert "hello world.txt" in output.read_text()
+            project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
+            with tarfile.open(output) as stream:
+                member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
+                assert stream.extractfile(member).read() == b"Hello from MC!\n"
+        finally:
+            server.stop(0).wait()

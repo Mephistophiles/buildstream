@@ -94,6 +94,24 @@ class ProjectInspector:
                 _, archive = cached
             return preview_archive(archive, member_path.as_posix(), limit)
 
+    def pull_artifact(self, name):
+        """Download this element, discard old previews and reload its listing."""
+        with self._preview_lock:
+            with self._lock:
+                if self._cancelled:
+                    raise ValueError("Loading cancelled")
+            command = ["artifact", "pull", "--deps", "none", "--", name]
+            self.execute(command)
+            with self._lock:
+                if self._cancelled:
+                    raise ValueError("Loading cancelled")
+                cached = self._artifact_previews.pop(name, None)
+            if cached:
+                cached[0].cleanup()
+            result = self.load(name, "artifacts")
+            result.text = "Artifact pull completed.\n" + shlex.join(self.base + command) + "\n\n" + result.text
+            return result
+
     def checkout_command(self, name, directory):
         return ["source", "checkout", "--deps", "none", "--directory", str(directory), "--", name]
 

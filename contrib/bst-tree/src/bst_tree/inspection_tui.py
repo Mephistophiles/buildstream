@@ -155,6 +155,7 @@ class InspectionScreen(ModalScreen):
         ("escape", "close", "Back"),
         Binding("q", "close", "Back", show=False),
         ("f", "fetch_sources", "Load sources"),
+        ("p", "pull_artifact", "Pull artifact"),
         ("i", "information", "Info"),
         Binding("tab", "app.focus_next", "Switch pane"),
     ]
@@ -166,6 +167,7 @@ class InspectionScreen(ModalScreen):
     InspectionScreen #content { width: 1fr; }
     InspectionScreen #inspection-help { height: auto; }
     InspectionScreen #load-sources { display: none; }
+    InspectionScreen #pull-artifact { display: none; }
     """
 
     def __init__(self, name, section, inspector):
@@ -178,6 +180,9 @@ class InspectionScreen(ModalScreen):
         self.closed = False
         self.can_checkout = False
         self.loading_sources = False
+        self.loading_initial = True
+        self.pulling_artifact = False
+        self.artifact_tree = None
         self.information = ""
         self.artifact_preview_lock = asyncio.Lock()
 
@@ -190,11 +195,13 @@ class InspectionScreen(ModalScreen):
             help_text += " · Enter: preview"
         yield Static(help_text, id="inspection-help", markup=False)
         yield Button("f  Load source files (may download)", id="load-sources")
+        yield Button("p  Pull artifact from remotes", id="pull-artifact", disabled=True)
         with Horizontal(id="inspection-body"):
             yield TextArea("Loading…", read_only=True, soft_wrap=False, id="content")
         yield Footer()
 
     def on_mount(self):
+        self.query_one("#pull-artifact").display = self.section == "artifacts"
         self.query_one(TextArea).focus()
         self.run_worker(self.load())
 
@@ -211,12 +218,26 @@ class InspectionScreen(ModalScreen):
             if result.workspace:
                 await self.mount_files(result.workspace)
             elif result.artifacts is not None:
-                tree = ArtifactTree(result.artifacts)
-                await self.query_one("#inspection-body").mount(tree, before=self.query_one(TextArea))
-                tree.focus()
+                await self.mount_artifacts(result.artifacts)
         except Exception as error:
             if not self.closed:
                 self.query_one(TextArea).load_text(f"Unable to load {self.section}:\n{error}")
+        finally:
+            self.loading_initial = False
+            if not self.closed:
+                self.query_one("#pull-artifact", Button).disabled = False
+                self.refresh_bindings()
+
+    async def mount_artifacts(self, entries):
+        previous, self.artifact_tree = self.artifact_tree, None
+        if previous is not None:
+            await previous.remove()
+        if self.closed:
+            return
+        tree = self.artifact_tree = ArtifactTree(entries)
+        await self.query_one("#inspection-body").mount(tree, before=self.query_one(TextArea))
+        if not self.closed:
+            tree.focus()
 
     async def mount_files(self, path):
         self.workspace = path
@@ -225,9 +246,56 @@ class InspectionScreen(ModalScreen):
         tree.focus()
 
     def check_action(self, action, parameters):
+        if action == "pull_artifact":
+            return self.section == "artifacts" and not self.loading_initial and not self.pulling_artifact
         if action == "fetch_sources":
             return self.can_checkout and not self.loading_sources
         return True
+
+    @on(Button.Pressed, "#pull-artifact")
+    def pull_artifact_pressed(self, event):
+        event.stop()
+        self.action_pull_artifact()
+
+    def action_pull_artifact(self):
+        if self.closed or not self.check_action("pull_artifact", ()):
+            return
+        self.pulling_artifact = True
+        self.preview_generation += 1
+        self.query_one("#pull-artifact", Button).disabled = True
+        if self.artifact_tree is not None:
+            self.artifact_tree.disabled = True
+        self.refresh_bindings()
+        self.query_one(TextArea).load_text(
+            "Pulling this element's artifact from configured remotes…\n"
+            "Dependencies are not pulled. Esc cancels and returns to the tree."
+        )
+
+        async def pull():
+            try:
+                # An in-flight export must finish before the pull can reuse
+                # this screen's runner and invalidate its preview archive.
+                async with self.artifact_preview_lock:
+                    if self.closed:
+                        return
+                    result = await asyncio.to_thread(self.inspector.pull_artifact, self.element_name)
+                if self.closed:
+                    return
+                self.information = result.text
+                self.query_one(TextArea).load_text(result.text)
+                await self.mount_artifacts(result.artifacts or [])
+            except Exception as error:
+                if not self.closed:
+                    self.query_one(TextArea).load_text(f"Unable to pull artifact:\n{error}\n\n{self.information}")
+            finally:
+                self.pulling_artifact = False
+                if not self.closed:
+                    self.query_one("#pull-artifact", Button).disabled = False
+                    if self.artifact_tree is not None:
+                        self.artifact_tree.disabled = False
+                    self.refresh_bindings()
+
+        self.run_worker(pull())
 
     @on(Button.Pressed, "#load-sources")
     def load_sources_pressed(self, event):
@@ -278,6 +346,8 @@ class InspectionScreen(ModalScreen):
     def tree_event(self, event):
         event.stop()
         if isinstance(event.control, ArtifactTree):
+            if self.closed or self.pulling_artifact or event.control is not self.artifact_tree:
+                return
             self.preview_generation += 1
             if event.node.data:
                 entry = event.node.data
@@ -289,6 +359,8 @@ class InspectionScreen(ModalScreen):
                 self.action_information()
 
     def preview_artifact(self, entry):
+        if self.pulling_artifact:
+            return
         if entry.details.startswith("l"):
             self.query_one(TextArea).load_text(f"{entry.details}\n\nSymlink; preview does not follow links.")
             return

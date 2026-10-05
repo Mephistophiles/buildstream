@@ -50,6 +50,13 @@ action. You can use these shortcuts directly from the graph:
   Listing requires a locally cached artifact. Checkout may retrieve missing data
   through configured artifact remotes; no build or integration commands are run.
   Symlinks display their targets and are not followed for previews.
+  Press `p` or **Pull artifact from remotes** to download the selected element
+  with `bst artifact pull --deps none`, using the same project and options.
+  This action also works when the initial listing reports a missing artifact.
+  On success the file tree is reloaded and any old preview archive is discarded.
+  Errors are shown in the viewer and can be retried; Escape cancels the pull.
+  Only the selected element is pulled, without its dependencies; downloaded data
+  remains in BuildStream's cache after closing the viewer.
 - `b`: show the resolved element configuration, including build commands where
   supported by its kind, plus variables and environment (`bst show`). These are
   the effective settings, rather than the original `.bst` YAML or a build log.
@@ -143,8 +150,9 @@ changes with `old`/`new`, and metadata changes.
 This tool uses documented `bst show` fields, not private BuildStream APIs. The
 installed BuildStream must support `name`, `kind`, `full-key`, `source-info`,
 `workspaced`, `build-deps`, and `runtime-deps`. Unsupported output fails explicitly.
-No build or track command is run. Source checkout runs only when requested with
-`f` or **Load source files**, and can fetch missing sources. Project loading can
+No build or track command is run. Explicit artifact pull runs on `p` in the
+artifact viewer and downloads from configured artifact remotes. Source checkout
+runs only when requested with `f` or **Load source files**, and can fetch missing sources. Project loading can
 still require junction sources and plugin configuration; cache queries may follow
 BuildStream settings.
 

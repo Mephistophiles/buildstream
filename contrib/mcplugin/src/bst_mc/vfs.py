@@ -19,7 +19,9 @@ persistent checkout cache or background server is needed.
 
 from dataclasses import dataclass
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import posixpath
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,6 +38,7 @@ ACTIONS = (
     "source-info.txt",
     "build-commands.txt",
     "artifact-list.txt",
+    "artifact-pull.txt",
     "sources.tar",
     "artifact.tar",
     "paths.txt",
@@ -43,7 +46,7 @@ ACTIONS = (
 HELP = """BuildStream project in Midnight Commander (read-only)
 
 Enter all/, build/ or run/, then targets/ to start dependency navigation.
-elements/ is a flat searchable index of every element in that scope.
+elements/ groups elements by their project directories.
 Enter dependencies/ or reverse-dependencies/ and follow element links.
 MC's Ctrl-s searches panel names. '..' goes up; Alt-y returns in directory history.
 tree.txt displays a bounded dependency tree, with build/run edge types.
@@ -53,6 +56,10 @@ paths.txt shows one shortest path from each applicable target in this scope.
 F3: view source-info.txt, build-commands.txt, artifact-list.txt, element.json.
 Build commands are resolved configuration, variables and environment, not a log.
 artifact-list.txt runs bst artifact list-contents --long.
+F3 on artifact-pull.txt downloads this element with bst artifact pull --deps none
+and shows the updated listing. This explicitly writes to BuildStream's cache.
+MC caches the result: free/reopen this VFS to run the action again or refresh
+previously viewed artifact-list.txt / artifact.tar.
 
 Enter sources.tar: bst source checkout --deps none --tar ...
 Enter artifact.tar: bst artifact checkout --deps none --no-integrate --tar ...
@@ -76,6 +83,14 @@ def component(name):
     """Keep slashes, junction colons, whitespace and arrows out of extfs names."""
     encoded = quote(name, safe="")
     return encoded.replace(".", "%2E") if name in (".", "..") else encoded
+
+
+def element_path(name):
+    """Keep project directories as directories, escaping only each component."""
+    parts = name.split("/")
+    if any(part in ("", ".", "..") or "\x00" in part for part in parts):
+        raise ValueError("Invalid element path")
+    return "/".join(component(part) for part in parts)
 
 
 def run_bst(arguments, **kwargs):
@@ -129,6 +144,20 @@ class Project:
         return self._graph
 
     def entries(self):
+        emitted = {}
+        for entry in self._entries():
+            # extfs needs explicit parent directories; several elements can
+            # share them, so emit each exactly once, before its children.
+            parents = reversed(PurePosixPath(entry.path).parents)
+            for candidate in [*(Entry(str(p), "dir") for p in parents if str(p) != "."), entry]:
+                existing = emitted.get(candidate.path)
+                if existing is None:
+                    emitted[candidate.path] = candidate
+                    yield candidate
+                elif existing != candidate:
+                    raise ValueError(f"Conflicting virtual paths: {candidate.path}")
+
+    def _entries(self):
         yield Entry("README.txt", size=len(HELP.encode()))
         for scope in SCOPES:
             graph = self.graph.scoped(scope)
@@ -137,10 +166,11 @@ class Project:
             yield Entry(f"{scope}/targets", "dir")
             yield Entry(f"{scope}/elements", "dir")
             for name in graph.targets:
-                encoded = component(name)
-                yield Entry(f"{scope}/targets/{encoded}", "link", f"../elements/{encoded}")
+                encoded = element_path(name)
+                path = f"{scope}/targets/{encoded}"
+                yield Entry(path, "link", posixpath.relpath(f"{scope}/elements/{encoded}", posixpath.dirname(path)))
             for name in sorted(graph.nodes):
-                root = f"{scope}/elements/{component(name)}"
+                root = f"{scope}/elements/{element_path(name)}"
                 yield Entry(root, "dir")
                 for action in ACTIONS:
                     yield Entry(f"{root}/{action}")
@@ -152,11 +182,12 @@ class Project:
                     (parent, child, "dependencies"),
                     (child, parent, "reverse-dependencies"),
                 ):
-                    encoded = component(destination)
+                    encoded = element_path(destination)
+                    path = f"{scope}/elements/{element_path(name)}/{folder}/{encoded} [{label}]"
                     yield Entry(
-                        f"{scope}/elements/{component(name)}/{folder}/{encoded} [{label}]",
+                        path,
                         "link",
-                        f"../../{encoded}",
+                        posixpath.relpath(f"{scope}/elements/{encoded}", posixpath.dirname(path)),
                     )
 
     def tree(self, scope):
@@ -184,10 +215,10 @@ class Project:
             content = HELP
         elif len(parts) == 2 and parts[0] in SCOPES and parts[1] == "tree.txt":
             content = self.tree(parts[0])
-        elif len(parts) == 4 and parts[0] in SCOPES and parts[1] == "elements" and parts[3] in ACTIONS:
-            scope, _, encoded, action = parts
+        elif len(parts) >= 4 and parts[0] in SCOPES and parts[1] == "elements" and parts[-1] in ACTIONS:
+            scope, encoded, action = parts[0], "/".join(parts[2:-1]), parts[-1]
             name = unquote(encoded)
-            if component(name) != encoded or not name or "\x00" in name:
+            if element_path(name) != encoded:
                 raise ValueError("Invalid encoded element name")
             if action in ("sources.tar", "artifact.tar"):
                 self.export(name, action, destination)
@@ -198,6 +229,12 @@ class Project:
                 content = self.inspector.show(name, "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}")
             elif action == "artifact-list.txt":
                 content = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
+            elif action == "artifact-pull.txt":
+                command = ["artifact", "pull", "--deps", "none", "--", name]
+                output = self.inspector.execute(command)
+                listing = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
+                content = "Artifact pull completed.\n" + shlex.join(self.inspector.base + command)
+                content += "\n\n" + output + listing
             else:
                 graph = self.graph.scoped(scope)
                 if name not in graph.nodes:

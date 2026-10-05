@@ -557,6 +557,128 @@ async def test_artifact_preview_and_retry():
         assert app.selected() == "app.bst"
 
 
+async def test_artifact_pull_after_missing_artifact_and_retry():
+    class PullInspector(FakeInspector):
+        def load(self, name, section):
+            raise ValueError("Artifact not cached")
+
+        def pull_artifact(self, name):
+            self.calls.append((name, "pull"))
+            if len(self.calls) == 1:
+                raise ValueError("Remote unavailable")
+            return Inspection("Artifact pull completed", artifacts=[ArtifactEntry("new.txt", "reg 3 new.txt")])
+
+    inspector = PullInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test(size=(60, 18)) as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        button = app.screen.query_one("#pull-artifact", Button)
+        assert button.display and not button.disabled
+        assert "Artifact not cached" in app.screen.query_one(TextArea).text
+        await pilot.press("p")
+        await pilot.pause()
+        assert "Remote unavailable" in app.screen.query_one(TextArea).text
+        assert not button.disabled
+        assert await pilot.click("#pull-artifact")
+        await pilot.pause()
+        files = app.screen.query_one(ArtifactTree)
+        assert files.root.children[0].data.path == "new.txt"
+        assert len(app.screen.query(ArtifactTree)) == 1
+        assert inspector.calls == [("app.bst", "pull")] * 2
+        await pilot.press("i")
+        assert "Artifact pull completed" in app.screen.query_one(TextArea).text
+        await pilot.press("escape", "b")
+        await pilot.pause()
+        assert not app.screen.query_one("#pull-artifact").display
+        await pilot.press("p")
+        assert len(inspector.calls) == 2
+
+
+async def test_artifact_pull_cancellation_and_no_duplicate_command():
+    import threading
+
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    class PullInspector(FakeInspector):
+        def pull_artifact(self, name):
+            self.calls.append((name, "pull"))
+            started.set()
+            release.wait(timeout=5)
+            finished.set()
+            return Inspection("Late result", artifacts=[])
+
+        def cancel(self):
+            super().cancel()
+            release.set()
+
+    inspector = PullInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+        assert started.is_set()
+        assert app.screen.query_one("#pull-artifact", Button).disabled
+        await pilot.press("p", "p", "escape")
+        await pilot.pause()
+        assert finished.is_set() and inspector.cancelled
+        assert inspector.calls.count(("app.bst", "pull")) == 1
+        assert app.selected() == "app.bst"
+
+
+async def test_pull_waits_for_preview_and_replaces_old_file_tree():
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+
+    class PullInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Old listing", artifacts=[ArtifactEntry("old.txt", "reg 3 old.txt")])
+
+        def preview_artifact(self, name, path):
+            self.calls.append("preview")
+            started.set()
+            release.wait(timeout=5)
+            return "Old preview"
+
+        def pull_artifact(self, name):
+            self.calls.append("pull")
+            return Inspection("Fresh listing", artifacts=[ArtifactEntry("new.txt", "reg 3 new.txt")])
+
+        def cancel(self):
+            super().cancel()
+            release.set()
+
+    inspector = PullInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        files = app.screen.query_one(ArtifactTree)
+        files.move_cursor(files.root.children[0])
+        await pilot.press("enter")
+        await pilot.pause()
+        assert started.is_set()
+        await pilot.press("p")
+        await pilot.pause()
+        assert inspector.calls == ["preview"]
+        release.set()
+        await pilot.pause()
+        assert inspector.calls == ["preview", "pull"]
+        assert app.screen.query_one(ArtifactTree) is not files
+        assert "Old preview" not in app.screen.query_one(TextArea).text
+        assert app.screen.query_one(ArtifactTree).root.children[0].data.path == "new.txt"
+        assert not app.screen.query_one("#pull-artifact", Button).disabled
+
+
 @pytest.mark.parametrize("finish", ["select", "info", "close"])
 async def test_pending_artifact_preview_does_not_replace_new_selection(finish):
     import threading

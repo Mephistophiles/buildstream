@@ -64,6 +64,7 @@ def test_live_buildstream(tmp_path, monkeypatch):
     checked_out_source = next(checkout.workspace.rglob("main.c"))
     assert preview_file(checkout.workspace, checked_out_source) == "int main() {}\n"
     inspector.cancel()
+
     assert not checkout.workspace.parent.exists()
     inspector = ProjectInspector(project)
     workspace = tmp_path / "workspace"
@@ -85,3 +86,30 @@ def test_live_buildstream(tmp_path, monkeypatch):
     assert inspector.preview_artifact("import.bst", "main.c") == "int main() {}\n"
     assert inspector.preview_artifact("import.bst", "main.c", limit=4).startswith("int ")
     inspector.cancel()
+
+    from buildstream._cas.casserver import create_server
+
+    # Serve a real artifact on loopback, then pull it into a fresh local cache.
+    # Private server APIs are used only in this opt-in integration test.
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    with create_server(str(remote), enable_push=True, quota=None, index_only=False) as server:
+        port = server.add_insecure_port("127.0.0.1:0")
+        server.start()
+        try:
+            inspector = ProjectInspector(project)
+            url = f"http://127.0.0.1:{port}"
+            inspector.execute(["artifact", "push", "--artifact-remote", url, "--", "import.bst"])
+            monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "fresh-cache"))
+            config = tmp_path / "config" / "buildstream.conf"
+            config.parent.mkdir(exist_ok=True)
+            config.write_text(f"artifacts:\n  servers:\n  - url: {url}\n")
+            with pytest.raises(ValueError):
+                inspector.load("import.bst", "artifacts")
+            pulled = inspector.pull_artifact("import.bst")
+            assert "Artifact pull completed" in pulled.text
+            assert [entry.path for entry in pulled.artifacts] == ["main.c"]
+            assert inspector.preview_artifact("import.bst", "main.c") == "int main() {}\n"
+            inspector.cancel()
+        finally:
+            server.stop(0).wait()

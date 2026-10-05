@@ -67,6 +67,59 @@ def test_command_failure():
         inspector.load("uncached.bst", "artifacts")
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_artifact_pull_refreshes_listing_and_discards_preview(failed):
+    from pathlib import Path
+    import tempfile
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        if "pull" in args:
+            return subprocess.CompletedProcess(args, int(failed), "")
+        row = "-rw-r--r-- reg 3 fresh.txt" if "--long" in args else "fresh.txt"
+        return subprocess.CompletedProcess(args, 0, "app.bst:\n\t" + row + "\n")
+
+    inspector = ProjectInspector("/project with spaces", [("arch", "aarch64")], run=run)
+    temporary = tempfile.TemporaryDirectory(prefix="bst-tree-test-preview-")
+    archive = Path(temporary.name) / "artifact.tar"
+    archive.write_bytes(b"old contents")
+    inspector._artifact_previews["sdk.bst:dir/app.bst"] = (temporary, archive)
+    try:
+        if failed:
+            with pytest.raises(ValueError):
+                inspector.pull_artifact("sdk.bst:dir/app.bst")
+            assert archive.exists()
+            assert len(calls) == 1
+        else:
+            result = inspector.pull_artifact("sdk.bst:dir/app.bst")
+            assert not archive.parent.exists()
+            assert "Artifact pull completed" in result.text
+            assert [entry.path for entry in result.artifacts] == ["fresh.txt"]
+            assert "sdk.bst:dir/app.bst" not in inspector._artifact_previews
+            assert len(calls) == 3
+        assert calls[0] == inspector.base + ["artifact", "pull", "--deps", "none", "--", "sdk.bst:dir/app.bst"]
+    finally:
+        inspector.cancel()
+
+
+def test_cancelled_artifact_pull_does_not_reload():
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        inspector.cancel()
+        return subprocess.CompletedProcess(args, 0, "")
+
+    inspector = ProjectInspector(run=run)
+    with pytest.raises(ValueError, match="cancelled"):
+        inspector.pull_artifact("app.bst")
+    with pytest.raises(ValueError, match="cancelled"):
+        inspector.pull_artifact("app.bst")
+    assert len(calls) == 1
+
+
 def test_file_previews(tmp_path):
     source = tmp_path / "main.c"
     source.write_text("int main() {}\n")
