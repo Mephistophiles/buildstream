@@ -37,7 +37,6 @@ ACTIONS = (
     "element.json",
     "source-info.txt",
     "build-commands.txt",
-    "artifact-list.txt",
     "sources.tar",
     "artifact.tar",
     "paths.txt",
@@ -53,9 +52,8 @@ tree.txt displays a bounded dependency tree, with build/run edge types.
 Shared subtrees are expanded once; [see above] also terminates cycles.
 paths.txt shows one shortest path from each applicable target in this scope.
 
-F3: view source-info.txt, build-commands.txt, artifact-list.txt, element.json.
+F3: view source-info.txt, build-commands.txt, element.json.
 Build commands are resolved configuration, variables and environment, not a log.
-artifact-list.txt runs bst artifact list-contents --long.
 
 Enter sources.tar: bst source checkout --deps none --tar ...
 Enter artifact.tar: pull if not cached, then
@@ -249,8 +247,6 @@ class Project:
                 content = self.inspector.show(name, "%{source-info}")
             elif action == "build-commands.txt":
                 content = self.inspector.show(name, "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}")
-            elif action == "artifact-list.txt":
-                content = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
             else:
                 graph = self.graph.scoped(scope)
                 if name not in graph.nodes:

@@ -148,8 +148,8 @@ def test_junction_navigation_links_and_listing(descriptor, graph, tmp_path):
         assert f"all/targets/{vfs.element_path(name)}" in indexed
         project.copyout(f"all/elements/{vfs.element_path(name)}/element.json", tmp_path / "out")
         assert json.loads((tmp_path / "out").read_text())["name"] == name
-        project.copyout(f"all/elements/{vfs.element_path(name)}/artifact-list.txt", tmp_path / "out")
-        assert calls[-1][-5:] == ["artifact", "list-contents", "--long", "--", name]
+        project.copyout(f"all/elements/{vfs.element_path(name)}/source-info.txt", tmp_path / "out")
+        assert calls[-1][-7:] == ["show", "--deps", "none", "--format", "%{source-info}", "--", name]
     for entry in entries:
         if entry.kind == "link":
             target = posixpath.normpath(posixpath.join(posixpath.dirname(entry.path), entry.target))
@@ -170,7 +170,6 @@ def test_noncanonical_junction_paths_are_rejected(path):
     ("build-commands.txt", ["show", "--deps", "none", "--format",
                             "Configuration:\n%{config}\nVariables:\n%{vars}\nEnvironment:\n%{env}",
                             "--", "sdk.bst:base/lib.bst"]),
-    ("artifact-list.txt", ["artifact", "list-contents", "--long", "--", "sdk.bst:base/lib.bst"]),
 ])
 def test_lazy_inspection_commands(descriptor, tmp_path, action, expected):
     calls = []
@@ -391,8 +390,6 @@ def test_live_buildstream(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
     project.inspector.execute(["build", "--", "default/element/fo/files.bst"])
-    project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
-    assert "hello world.txt" in output.read_text()
     project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
     with tarfile.open(output) as stream:
         member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
@@ -417,15 +414,13 @@ def test_live_buildstream(tmp_path, monkeypatch):
             config = tmp_path / "config" / "buildstream.conf"
             config.parent.mkdir(exist_ok=True)
             config.write_text(f"artifacts:\n  servers:\n  - url: {url}\n")
-            with pytest.raises(ValueError):
-                project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
+            assert project.inspector.show("default/element/fo/files.bst", "%{state}").strip() != "cached"
             # Opening the archive must pull the missing artifact from the remote.
             project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
             with tarfile.open(output) as stream:
                 member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
                 assert stream.extractfile(member).read() == b"Hello from MC!\n"
-            project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
-            assert "hello world.txt" in output.read_text()
+            assert project.inspector.show("default/element/fo/files.bst", "%{state}").strip() == "cached"
         finally:
             server.stop(0).wait()
 

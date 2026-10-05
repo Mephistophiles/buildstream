@@ -151,7 +151,6 @@ project.bstmc/bstmc://
         paths.txt            # кратчайший путь от каждой подходящей цели
         source-info.txt
         build-commands.txt
-        artifact-list.txt
         sources.tar
         artifact.tar
   build/                     # build-зависимости целей и их runtime-замыкание
@@ -194,7 +193,6 @@ sdk.bst:base.bst:default/lib.bst
 | --- | --- |
 | `source-info.txt` | F3: `bst show --format '%{source-info}'` |
 | `build-commands.txt` | F3: resolved config, variables и environment из `bst show` |
-| `artifact-list.txt` | F3: `bst artifact list-contents --long` |
 | `sources.tar` | Enter: `bst source checkout --deps none --tar …` |
 | `artifact.tar` | Enter: автоматический `bst artifact pull --deps none`, если артефакта нет в кеше, затем `bst artifact checkout --deps none --no-integrate --tar …` |
 
@@ -209,14 +207,14 @@ sdk.bst:base.bst:default/lib.bst
 artifact remotes, с опциями текущего проекта.
 При ошибке операция завершается с диагностикой, после чего её можно повторить.
 MC кеширует успешно открытые файлы: для обновления
-уже открытых `artifact-list.txt` / `artifact.tar` освободите VFS или перезапустите
-MC. Сам просмотр дерева зависимостей ничего не скачивает через `artifact pull`.
+уже открытого `artifact.tar` освободите VFS или перезапустите MC. Сам просмотр
+дерева зависимостей ничего не скачивает через `artifact pull`.
 
 ## Загрузка и ограничения
 
-При открытии проекта загружается только граф. Просмотр списка артефакта не
-выгружает его файлы. Открытие tar экспортирует **весь выбранный элемент** во
-временный архив, что может потребовать времени и места. Source checkout может
+При открытии проекта загружается только граф. Открытие tar экспортирует
+**весь выбранный элемент** во временный архив, что может потребовать времени
+и места. Source checkout может
 скачивать отсутствующие исходники; открытие `artifact.tar` скачивает отсутствующий артефакт
 из настроенных remotes. Сборка, track и integration-команды не запускаются.
 Без доступного артефакта checkout завершается ошибкой. Открытый workspace
