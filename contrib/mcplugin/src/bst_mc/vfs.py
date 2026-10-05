@@ -43,35 +43,50 @@ ACTIONS = (
 )
 HELP = """BuildStream project in Midnight Commander (read-only)
 
-Enter all/, build/ or run/, then targets/ to start dependency navigation.
-elements/ groups elements by their project directories.
+GETTING STARTED
+Open all/targets/, choose a target, then follow dependencies/.
+all/ contains the full graph; run/ contains runtime dependencies; build/
+contains direct build dependencies and their runtime closure, retaining roots.
+elements/ groups canonical element directories by their project paths.
 Junctions are folders marked [junction]; nested junctions form nested folders.
-Enter dependencies/ or reverse-dependencies/ and follow element links.
-MC's Ctrl-s searches panel names. '..' goes up; Alt-y returns in directory history.
-tree.txt displays a bounded dependency tree, with build/run edge types.
-Shared subtrees are expanded once; [see above] also terminates cycles.
+
+NAVIGATION
+Enter opens directories and dependency links; '..' goes up.
+Alt-y returns in directory history; Ctrl-s searches panel names.
+dependencies/ and reverse-dependencies/ link within the selected scope.
+tree.txt shows build/run edges; [see above] bounds shared subtrees and cycles.
 paths.txt shows one shortest path from each applicable target in this scope.
 
-F3: view source-info.txt, build-commands.txt, element.json.
-Build commands are resolved configuration, variables and environment, not a log.
-
+INSPECTION
+F3 on element.json: original name, kind, key, provenance, workspace presence.
+F3 on source-info.txt: source provenance from bst show.
+F3 on build-commands.txt: resolved configuration, variables, and environment.
+Build commands are effective settings, not the original YAML or a build log.
 Enter sources.tar: bst source checkout --deps none --tar ...
 Enter artifact.tar: pull if not cached, then
 bst artifact checkout --deps none --no-integrate --tar ...
-MC opens these nested tar archives; Enter browses directories, F3 views any
-file (including binary files), and F5 copies files to the other panel.
-Source checkout may fetch sources; artifact.tar automatically pulls missing
-artifacts from configured remotes with bst artifact pull --deps none.
-Neither action builds, tracks sources, or runs integration commands.
-Sources reflect BuildStream checkout semantics, including an open workspace.
-The whole element is exported on first access, so large elements may take time
-and temporary disk space. MC caches exports and removes them with its VFS cache.
-Do not edit the nested archives: writing back to the project is unsupported.
+Inside an archive, Enter browses folders, F3 views files, and F5 copies them
+into the other panel. Binary files can also be opened in MC's viewer.
 
+DOWNLOADS AND LIMITATIONS
+The entire selected element is exported on first access, without dependencies.
+Large exports can take time and temporary disk space.
+Source checkout may fetch sources and follows open-workspace semantics.
+artifact.tar pulls missing artifacts from configured remotes with
+bst artifact pull --deps none. Cached artifacts skip the pull.
+Downloads remain in BuildStream's cache after MC closes. Neither action
+builds, tracks sources, or runs integration commands. Failures can be retried.
+Do not edit nested archives: writing back to the project is unsupported.
+
+REFRESH AND TROUBLESHOOTING
 All commands use the bookmark's project directory/options and strict mode.
-Listings and inspection are live queries, not a consistent project snapshot.
-To refresh cached results, leave the VFS and use MC's active VFS list to free it,
-or restart MC. Ctrl-r alone may reuse the extfs archive listing.
+Bookmarks are live project references, not snapshots. Separate queries can
+observe different project states. Unloaded virtual files show a size of zero.
+MC caches listings and exports. Leave the VFS and free it through MC's active
+VFS list, or restart MC; Ctrl-r alone may reuse cached results.
+If setup fails, run bst-mc --install-mc and restart MC. Check that bst is on
+PATH and can load the project with its required plugins and options.
+Use bst-mc --help for launch options; bstmc --help for protocol diagnostics.
 """
 
 
@@ -279,6 +294,12 @@ class Project:
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args in (["--help"], ["-h"]):
+        print("Usage: bstmc list BOOKMARK | bstmc copyout BOOKMARK MEMBER DESTINATION\n"
+              "Read-only MC extfs helper. Use bst-mc to launch MC or create bookmarks.\n"
+              "list prints the virtual filesystem; copyout exports one member.\n"
+              "Example: bstmc copyout project.bstmc all/elements/app.bst/element.json /tmp/element.json")
+        return 0
     if args == ["--version"]:
         print(f"bst-mc {__version__}")
         return 0

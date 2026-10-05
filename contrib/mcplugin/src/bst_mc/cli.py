@@ -36,14 +36,26 @@ def project_arguments(directory, targets):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        epilog="Examples: bst-mc /path/to/project app.bst; bst-mc -C /path/to/project app.bst",
+        prog="bst-mc",
+        description="Browse BuildStream dependencies, sources, and artifacts in Midnight Commander.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  bst-mc --install-mc
+  bst-mc /path/to/project app.bst
+  bst-mc -C /path/to/project --option arch x86-64 app.bst
+  bst-mc /path/to/project app.bst -o project.bstmc
+
+Requires MC with extfs and a working bst on PATH. Register the helper once,
+then restart MC. Open all/targets/ to navigate; README.txt contains the guide.
+Bookmarks refer to a live project, not a snapshot. Opening archives can fetch
+sources or pull artifacts; no build or integration commands are run.""",
     )
     parser.add_argument("--version", action="version", version=f"bst-mc {__version__}")
-    parser.add_argument("--install-mc", action="store_true", help="Register the extfs helper for your MC user")
-    parser.add_argument("-C", "--directory", help="BuildStream project directory")
-    parser.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"))
-    parser.add_argument("-o", "--output", type=Path, help="Write a .bstmc bookmark instead of starting MC")
+    parser.add_argument("--install-mc", action="store_true", help="Install/update the per-user extfs helper; use alone and restart MC afterward")
+    parser.add_argument("-C", "--directory", help="Project directory (default: current directory or first positional directory)")
+    parser.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"),
+                        help="Set a BuildStream project option; may be repeated (queries use strict mode)")
+    parser.add_argument("-o", "--output", type=Path, help="Create a .bstmc bookmark without loading the graph or starting MC; refuses overwrite")
     parser.add_argument("targets", nargs="*", metavar="PROJECT_OR_ELEMENT",
                         help="Optional project directory, then elements (defaults to the project's default targets)")
     args = parser.parse_intermixed_args(argv)

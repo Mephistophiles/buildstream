@@ -27,21 +27,48 @@ from .inspection import ProjectInspector
 
 
 def parser():
-    result = argparse.ArgumentParser(prog="bst-tree")
+    result = argparse.ArgumentParser(
+        prog="bst-tree",
+        description="Explore BuildStream dependency graphs and compare portable JSON snapshots.",
+        epilog="Run bst-tree COMMAND --help for examples and command options.",
+    )
     commands = result.add_subparsers(dest="command", required=True)
     for command in ("browse", "snapshot"):
-        sub = commands.add_parser(command)
-        sub.add_argument("targets", nargs="*" if command == "browse" else "+")
-        sub.add_argument("-C", "--directory")
-        sub.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"))
+        description = (
+            "Browse a live project or a saved snapshot in a terminal."
+            if command == "browse" else "Save the full dependency graph as a portable JSON snapshot."
+        )
+        sub = commands.add_parser(
+            command, help=description, description=description,
+            epilog=(
+                "Examples: bst-tree browse -C /path/to/project app.bst; "
+                "bst-tree browse --snapshot graph.json. Snapshot mode has no live element inspection."
+                if command == "browse" else
+                "Example: bst-tree snapshot -C /path/to/project app.bst -o graph.json. "
+                "Existing output files are replaced atomically."
+            ),
+        )
+        sub.add_argument("targets", nargs="*" if command == "browse" else "+", metavar="TARGET",
+                         help="Explicit element names, including junction-qualified names; required for live projects")
+        sub.add_argument("-C", "--directory", help="Project directory (default: current directory)")
+        sub.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"),
+                         help="Set a BuildStream project option; may be repeated (queries use strict mode)")
         if command == "browse":
-            sub.add_argument("--snapshot")
+            sub.add_argument("--snapshot", metavar="FILE",
+                             help="Browse saved JSON without bst; cannot be combined with project arguments")
         else:
-            sub.add_argument("-o", "--output", required=True)
-    diff = commands.add_parser("diff")
-    diff.add_argument("old")
-    diff.add_argument("new")
-    diff.add_argument("--format", choices=("tree", "json"), default="tree")
+            sub.add_argument("-o", "--output", required=True, metavar="FILE",
+                             help="Output JSON snapshot; replaces an existing file")
+    diff = commands.add_parser(
+        "diff", help="Compare two snapshots without loading a project",
+        description="Compare saved graphs; no BuildStream installation or terminal is required.",
+        epilog="Example: bst-tree diff before.json after.json --structure-only --check. "
+               "Exit status: 0 success, 1 differences with --check, 2 error.",
+    )
+    diff.add_argument("old", help="Baseline JSON snapshot")
+    diff.add_argument("new", help="Updated JSON snapshot")
+    diff.add_argument("--format", choices=("tree", "json"), default="tree",
+                      help="Output format (default: tree); JSON never includes color escapes")
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
     diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
     diff.add_argument(

@@ -5,21 +5,50 @@ Requires Python 3.10+. BuildStream and the project's plugins must be installed a
 `bst` available on PATH when reading a live project. Snapshot browsing and diffing
 need neither BuildStream nor the original project.
 
+For Midnight Commander panels and live project bookmarks, see
+[`bst-mc`](../mcplugin/README.md). The two tools install independently.
+
+## Installation and quick start
+
+From the repository root:
+
 ```sh
-python3 -m venv .venv-bst-tree
-.venv-bst-tree/bin/pip install ./contrib/bst-tree
-.venv-bst-tree/bin/bst-tree browse -C /path/to/project app.bst
-.venv-bst-tree/bin/bst-tree snapshot -C /path/to/project app.bst -o before.json
-# After changing the project:
-.venv-bst-tree/bin/bst-tree snapshot -C /path/to/project app.bst -o after.json
-.venv-bst-tree/bin/bst-tree diff before.json after.json
-.venv-bst-tree/bin/bst-tree diff before.json after.json --format json --check
-.venv-bst-tree/bin/bst-tree browse --snapshot before.json
+pipx install ./contrib/bst-tree
+bst-tree browse -C /path/to/project app.bst
 ```
 
-Multiple targets and repeated `--option NAME VALUE` are supported. Snapshot writes
-are atomic and replace an existing output file. Snapshots always contain the full
-graph, even if you use a narrower scope in the UI.
+If the command is not found, run `pipx ensurepath` and open a new terminal.
+Install project plugins into the environment that provides `bst`, not bst-tree's
+isolated environment. Activate that environment first if needed.
+To update from a changed checkout, run `pipx install --force ./contrib/bst-tree`.
+
+## Commands
+
+| Command | Purpose | Requirements |
+| --- | --- | --- |
+| `browse -C PROJECT TARGET...` | Explore a live graph and inspect elements | Working `bst`, project plugins, and a terminal |
+| `browse --snapshot FILE` | Explore a saved graph | A terminal; no original project or `bst` required |
+| `snapshot -C PROJECT TARGET... -o FILE` | Save the full graph as JSON | Working `bst` and project plugins; no terminal required |
+| `diff OLD NEW` | Compare saved graphs as text or JSON | Neither `bst` nor a terminal required |
+
+Live `browse` and `snapshot` require at least one explicit target. `-C` defaults
+to the current directory. Multiple targets, junction-qualified names, and repeated
+`--option NAME VALUE` are supported; live queries run in strict mode.
+`browse --snapshot` cannot be combined with targets, `-C`, or project options.
+
+```sh
+bst-tree browse -C /path/to/project --option arch x86-64 app.bst sdk.bst:tools.bst
+bst-tree snapshot -C /path/to/project app.bst -o before.json
+# After changing the project:
+bst-tree snapshot -C /path/to/project app.bst -o after.json
+bst-tree diff before.json after.json
+bst-tree diff before.json after.json --format json --check
+bst-tree browse --snapshot before.json
+```
+
+Snapshot writes are atomic and **replace an existing output file**. Snapshots
+always contain the full graph; changing the UI scope does not modify the snapshot.
+Use `bst-tree --help` or `bst-tree COMMAND --help` for argument descriptions.
 
 ## Navigation
 
@@ -168,92 +197,38 @@ and typed directed edges. There are no timestamps or absolute project paths.
 Unknown format versions and dangling edges are rejected. Treat snapshots as project
 data: source provenance may contain URLs and other plugin-provided information.
 
+## Troubleshooting
+
+| Symptom | Action |
+| --- | --- |
+| `bst` is missing or a live project fails to load | Check `command -v bst` and `bst -C /path/to/project show app.bst` in the same terminal; verify project plugins and options. |
+| `browse requires a terminal` | Run it directly in a terminal; use `snapshot` and `diff` for scripts and CI. |
+| Element actions are unavailable | Snapshot mode contains graph data only. Reopen the live project to inspect files or build configuration. |
+| An artifact is missing | Open the artifact viewer and press `p` to pull it from configured remotes; the viewer does not build it. |
+| Source files are not shown | Use an existing workspace or press `f` in the source viewer to request a temporary checkout. |
+| A diff contains many cache-key changes | Use `--ignore-fields key` or `--structure-only`, according to the comparison you need. |
+
 ## Development
 
-### Architecture before element inspection (2026-10-02)
-
-The original implementation has five layers:
-
-- `cli.py` parses `browse`, `snapshot`, and `diff`. Only `browse` imports
-  Textual. `CancellableRunner` owns a single `bst` subprocess, captures its
-  diagnostics, and terminates it when the application exits.
-- `adapter.py` calls the public `bst show` CLI three times: version, the full
-  graph, and canonical target names. Random record/field delimiters frame
-  multiline YAML. It records kind, cache key, source provenance, workspace
-  presence, and build/run edges; it does not load element files or contents.
-- `model.py` owns the UI-independent `Graph`, scoped graphs, shortest paths,
-  validation, and atomic version-1 JSON snapshot writes. A node is keyed by
-  its full junction-qualified name; an edge carries build/run types.
-- `diff.py` compares snapshots and renders text/JSON, with attribute filters,
-  reverse edges, and bounded rendering of shared subtrees and cycles.
-- `tui.py` owns a Textual `Explorer`: header, search input, dependency `Tree`,
-  JSON details `Static`, status, and footer. Graph loading runs in a thread.
-  Each UI occurrence stores its ancestor path, allowing shared dependencies
-  to appear repeatedly. Children are populated on expansion. Scope and reverse
-  mode rebuild the tree; reverse mode saves expanded paths and selection.
-
-Original menu/navigation weaknesses to retain as regression cases:
-
-- All actions live at application level alongside the tree's own bindings;
-  focus and shortcut routing must be handled when adding other views.
-- The footer lists every navigation shortcut and has no compact action menu;
-  terminal resize is tested, but action visibility at small sizes is not.
-- Selecting the synthetic root leaves the previous element's details visible.
-- Escape in the search input also leaves reverse mode, instead of just closing
-  search. Reverse/search restoration and queued expansion events share mutable
-  tree state and need care around rebuilds.
-
-Existing tests cover graph parsing/snapshots/diffs, headless TUI navigation,
-lazy expansion, cycles, and loading cancellation. Live CLI coverage is opt-in.
-
-### Element inspection extension
-
-`inspection.py` provides `ProjectInspector` and bounded workspace file previews.
-It uses the public CLI and has no dependency on Textual or private cache layouts.
-`inspection_tui.py` contains the element menu and an isolated inspection screen
-with a read-only text viewer, lazy source/workspace directory tree, and selectable
-artifact file tree. Temporary source checkouts use the public CLI rather than
-private CAS paths or mounts. Each screen owns its cancellable command runner;
-background results cannot update a closed screen. The checkout worker retains
-ownership of its temporary directory until the command finishes, so closing a
-screen cannot remove a directory while BuildStream is still writing it. Artifact
-previews export a temporary tar on demand, reuse it within the viewer, and read
-only bounded regular-file content. Preview requests are serialized, and a late
-result cannot replace a newer selection or the information view.
-`cli.py` supplies a factory for live projects, while snapshot browsing supplies
-none. The graph model and snapshot format are unchanged.
-
-The extension also clears stale root details, closes search before leaving reverse
-mode on Escape, and prevents graph shortcuts from firing inside inspection views
-while retaining Tab/Shift+Tab focus navigation. Queued expansion and highlight
-events from previous tree roots are ignored after a rebuild.
-The footer hides redundant navigation bindings and exposes the scrollable element
-menu. Tests cover these focus/return paths, a small terminal, command arguments,
-unavailable artifacts/workspaces, bounded file previews, and queued scope changes.
+From the repository root, in a development virtualenv:
 
 ```sh
 python -m pip install -e './contrib/bst-tree[test]'
 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
-# Include live integration tests when bst and buildbox-casd are available:
+# Opt in only with a working bst and buildbox-casd installation:
 BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
 ```
 
-Verified locally with BuildStream 2.8.0, Python 3.14, and Textual 8.2 on macOS
-ARM64: all 62 tests pass, including live graph/snapshot comparison, resolved build
-configuration, workspace file inspection, a missing artifact, and contents of a
-real artifact built from an `import` element.
+The implementation separates CLI parsing (`cli.py`), public BuildStream CLI
+queries (`adapter.py`), graph validation and snapshots (`model.py`), comparison
+(`diff.py`), and terminal navigation (`tui.py`). Element inspection lives in
+`inspection.py` and `inspection_tui.py`. Snapshot and diff commands do not import
+Textual. Each interactive inspection owns a cancellable command runner and its
+temporary exports; late background results cannot update a closed viewer.
 
-```sh
-source .venv-bst-tree/bin/activate
-python -m pip install 'buildstream==2.8.0' -e './contrib/bst-tree[test]'
-# macOS: buildbox-casd is supplied by Homebrew's recc package.
-brew install recc
-ulimit -n 4096
-BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
-```
-
-The live test fixes its sandbox target to Linux/aarch64 and does not execute target
-binaries. BuildStream 2.8.0 does not recognize Darwin's `arm64` host spelling when
-deriving a default sandbox architecture; projects on this host need an explicit
-`sandbox.build-arch` such as `aarch64`. The higher file descriptor limit is needed
-by `buildbox-casd`; macOS's default of 256 was insufficient in this verification.
+Tests cover parsing, snapshots, comparison filters, scoped graphs, cycles,
+headless navigation, inspection, cancellation, and temporary-file cleanup.
+Live tests exercise a real project and artifact exports. They use an explicit
+Linux/aarch64 sandbox target without executing target binaries. On macOS,
+`buildbox-casd` may require a higher file-descriptor limit such as
+`ulimit -n 4096`; projects may also need an explicit `sandbox.build-arch`.
