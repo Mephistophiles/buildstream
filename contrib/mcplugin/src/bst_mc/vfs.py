@@ -1,0 +1,243 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""MC extfs list/copyout protocol, using only the public BuildStream CLI.
+
+The graph is finite: dependency directories link to canonical element directories.
+Expensive inspection happens only in copyout (F3/F5/Enter), never in list.
+MC owns extracted files, including nested source/artifact tar archives, so no
+persistent checkout cache or background server is needed.
+"""
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from urllib.parse import quote, unquote
+
+from bst_tree.adapter import capture
+from bst_tree.inspection import ProjectInspector
+
+
+SCOPES = ("all", "build", "run")
+ACTIONS = (
+    "element.json",
+    "source-info.txt",
+    "build-commands.txt",
+    "artifact-list.txt",
+    "sources.tar",
+    "artifact.tar",
+    "paths.txt",
+)
+HELP = """BuildStream project in Midnight Commander (read-only)
+
+Enter all/, build/ or run/, then targets/ to start dependency navigation.
+elements/ is a flat searchable index of every element in that scope.
+Enter dependencies/ or reverse-dependencies/ and follow element links.
+MC's Ctrl-s searches panel names. '..' goes up; Alt-y returns in directory history.
+tree.txt displays a bounded dependency tree, with build/run edge types.
+Shared subtrees are expanded once; [see above] also terminates cycles.
+paths.txt shows one shortest path from each applicable target in this scope.
+
+F3: view source-info.txt, build-commands.txt, artifact-list.txt, element.json.
+Build commands are resolved configuration, variables and environment, not a log.
+artifact-list.txt runs bst artifact list-contents --long.
+
+Enter sources.tar: bst source checkout --deps none --tar ...
+Enter artifact.tar: bst artifact checkout --deps none --no-integrate --tar ...
+MC opens these nested tar archives; Enter browses directories, F3 views any
+file (including binary files), and F5 copies files to the other panel.
+Source checkout may fetch sources; artifact checkout may pull from remotes.
+Neither action builds, tracks sources, or runs integration commands.
+Sources reflect BuildStream checkout semantics, including an open workspace.
+The whole element is exported on first access, so large elements may take time
+and temporary disk space. MC caches exports and removes them with its VFS cache.
+Do not edit the nested archives: writing back to the project is unsupported.
+
+All commands use the bookmark's project directory/options and strict mode.
+Listings and inspection are live queries, not a consistent project snapshot.
+To refresh cached results, leave the VFS and use MC's active VFS list to free it,
+or restart MC. Ctrl-r alone may reuse the extfs archive listing.
+"""
+
+
+def component(name):
+    """Keep slashes, junction colons, whitespace and arrows out of extfs names."""
+    encoded = quote(name, safe="")
+    return encoded.replace(".", "%2E") if name in (".", "..") else encoded
+
+
+def run_bst(arguments, **kwargs):
+    # MC treats *any* extfs stderr as an error dialog, including successful bst
+    # progress messages. Keep diagnostics for failures only.
+    result = subprocess.run(arguments, stderr=subprocess.PIPE, **kwargs)
+    if result.returncode and result.stderr:
+        print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
+    return result
+
+
+@dataclass
+class Entry:
+    path: str
+    kind: str = "file"
+    target: str | None = None
+    size: int = 0
+
+    def listing(self):
+        mode = {"file": "-r--r--r--", "dir": "dr-xr-xr-x", "link": "lrwxrwxrwx"}[self.kind]
+        suffix = f" -> {self.target}" if self.target else ""
+        return f"{mode} 1 0 0 {self.size} 01-01-2000 00:00 {self.path}{suffix}"
+
+
+class Project:
+    def __init__(self, descriptor, *, run=run_bst):
+        if not isinstance(descriptor, dict) or type(descriptor.get("format_version")) is not int:
+            raise ValueError("Expected a version-1 .bstmc bookmark")
+        if descriptor["format_version"] != 1:
+            raise ValueError("Unsupported .bstmc bookmark version")
+        directory = descriptor.get("directory")
+        targets, options = descriptor.get("targets"), descriptor.get("options", [])
+        if not isinstance(directory, str) or not Path(directory).is_absolute() or not Path(directory).is_dir():
+            raise ValueError("Bookmark directory must be an existing absolute project path")
+        if not isinstance(targets, list) or any(not isinstance(t, str) or not t for t in targets):
+            raise ValueError("Bookmark targets must be a list of element names")
+        if not isinstance(options, list) or any(
+            not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(v, str) for v in pair)
+            for pair in options
+        ):
+            raise ValueError("Bookmark options must be [name, value] pairs")
+        self.directory, self.targets, self.options = directory, targets, options
+        self.run = run
+        self.inspector = ProjectInspector(directory, options, run=run)
+        self._graph = None
+
+    @property
+    def graph(self):
+        if self._graph is None:
+            self._graph = capture(self.targets, self.directory, self.options, run=self.run)
+        return self._graph
+
+    def entries(self):
+        yield Entry("README.txt", size=len(HELP.encode()))
+        for scope in SCOPES:
+            graph = self.graph.scoped(scope)
+            yield Entry(scope, "dir")
+            yield Entry(f"{scope}/tree.txt")
+            yield Entry(f"{scope}/targets", "dir")
+            yield Entry(f"{scope}/elements", "dir")
+            for name in graph.targets:
+                encoded = component(name)
+                yield Entry(f"{scope}/targets/{encoded}", "link", f"../elements/{encoded}")
+            for name in sorted(graph.nodes):
+                root = f"{scope}/elements/{component(name)}"
+                yield Entry(root, "dir")
+                for action in ACTIONS:
+                    yield Entry(f"{root}/{action}")
+                yield Entry(f"{root}/dependencies", "dir")
+                yield Entry(f"{root}/reverse-dependencies", "dir")
+            for (parent, child), kinds in sorted(graph.edges.items()):
+                label = "+".join(sorted(kinds))
+                for name, destination, folder in (
+                    (parent, child, "dependencies"),
+                    (child, parent, "reverse-dependencies"),
+                ):
+                    encoded = component(destination)
+                    yield Entry(
+                        f"{scope}/elements/{component(name)}/{folder}/{encoded} [{label}]",
+                        "link",
+                        f"../../{encoded}",
+                    )
+
+    def tree(self, scope):
+        graph = self.graph.scoped(scope)
+        adjacency, expanded = graph.adjacency(), set()
+        lines = []
+        pending = [(root, "", 0) for root in reversed(graph.targets)]
+        while pending:
+            name, edge, depth = pending.pop()
+            repeated = name in expanded
+            lines.append("  " * depth + name + edge + (" [see above]" if repeated else ""))
+            if not repeated:
+                expanded.add(name)
+                for child, kinds in reversed(adjacency[name]):
+                    pending.append((child, " [" + "+".join(sorted(kinds)) + "]", depth + 1))
+        return "\n".join(lines) + "\n"
+
+    def copyout(self, member, destination):
+        # MC resolves VFS symlinks before copyout. Reject non-canonical paths,
+        # rather than allowing a caller to select a different local file.
+        parts = member.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            raise ValueError("Invalid VFS member path")
+        if member == "README.txt":
+            content = HELP
+        elif len(parts) == 2 and parts[0] in SCOPES and parts[1] == "tree.txt":
+            content = self.tree(parts[0])
+        elif len(parts) == 4 and parts[0] in SCOPES and parts[1] == "elements" and parts[3] in ACTIONS:
+            scope, _, encoded, action = parts
+            name = unquote(encoded)
+            if component(name) != encoded or not name or "\x00" in name:
+                raise ValueError("Invalid encoded element name")
+            if action in ("sources.tar", "artifact.tar"):
+                self.export(name, action, destination)
+                return
+            if action == "source-info.txt":
+                content = self.inspector.show(name, "%{source-info}")
+            elif action == "build-commands.txt":
+                content = self.inspector.load(name, "build").text
+            elif action == "artifact-list.txt":
+                content = self.inspector.execute(["artifact", "list-contents", "--long", "--", name])
+            else:
+                graph = self.graph.scoped(scope)
+                if name not in graph.nodes:
+                    raise ValueError("Element is no longer in this graph; reopen the project")
+                if action == "element.json":
+                    content = json.dumps({"name": name, **graph.nodes[name]}, ensure_ascii=False, indent=2) + "\n"
+                else:
+                    content = "\n".join(" -> ".join(path) for path in graph.paths_to(name)) + "\n"
+        else:
+            raise ValueError(f"Unknown VFS member: {member}")
+        Path(destination).write_text(content, encoding="utf-8")
+
+    def export(self, name, action, destination):
+        # BuildStream requires a nonexistent output; MC provides an existing
+        # temporary file. Stage separately and copy only a successful export.
+        with tempfile.TemporaryDirectory(prefix="bst-mc-export-") as temporary:
+            archive = Path(temporary) / "contents.tar"
+            command = ["source" if action == "sources.tar" else "artifact", "checkout", "--deps", "none"]
+            if action == "artifact.tar":
+                command.append("--no-integrate")
+            self.inspector.execute([*command, "--tar", str(archive), "--", name])
+            shutil.copyfile(archive, destination)
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        if not args or args[0] not in ("list", "copyout"):
+            raise ValueError("Read-only VFS: only list and copyout are supported")
+        if len(args) != (2 if args[0] == "list" else 4):
+            raise ValueError("Usage: bstmc list BOOKMARK | bstmc copyout BOOKMARK MEMBER DESTINATION")
+        project = Project(json.loads(Path(args[1]).read_text(encoding="utf-8")))
+        if args[0] == "list":
+            # Do not emit a partial archive if loading fails midway.
+            print("\n".join(entry.listing() for entry in project.entries()))
+        else:
+            project.copyout(args[2], args[3])
+        return 0
+    except (OSError, ValueError) as error:
+        print(f"bstmc: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
