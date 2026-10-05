@@ -60,7 +60,7 @@ def test_finite_graph_navigation_and_scopes(descriptor, graph):
     project._graph = graph
     entries = {entry.path: entry for entry in project.entries()}
     assert "run/elements/compiler.bst" not in entries
-    assert "build/elements/sdk.bst%3Abase/lib.bst" not in entries
+    assert "build/elements/sdk.bst [junction]/base/lib.bst" not in entries
     assert "build/elements/shared.bst" in entries
     for entry in entries.values():
         if entry.kind == "link":
@@ -100,7 +100,7 @@ def test_nested_element_directories_and_relative_links(descriptor, graph):
     assert "all/targets/default/element/fo/bar.bst" in indexed
     assert "all/elements/default/element/fo/bar.bst/dependencies/other/bar.bst [build+run]" in indexed
     assert "all/elements/other/bar.bst/reverse-dependencies/default/element/fo/baz.bst [run]" in indexed
-    assert "all/elements/sdk.bst%3Abase/dir%20with%20spaces/lib.bst" in indexed
+    assert "all/elements/sdk.bst [junction]/base/dir%20with%20spaces/lib.bst" in indexed
     seen = set()
     for entry in entries:
         assert "%2F" not in entry.path
@@ -110,6 +110,59 @@ def test_nested_element_directories_and_relative_links(descriptor, graph):
             target = posixpath.normpath(posixpath.join(parent, entry.target))
             assert indexed[target].kind == "dir"
         seen.add(entry.path)
+
+
+@pytest.mark.parametrize("name,path", [
+    ("sdk.bst:base/lib.bst", "sdk.bst [junction]/base/lib.bst"),
+    ("sdk.bst::base/lib.bst", "sdk.bst [junction x2]/base/lib.bst"),
+    ("junctions/sdk.bst:ports/base.bst:default/lib.bst",
+     "junctions/sdk.bst [junction]/ports/base.bst [junction]/default/lib.bst"),
+    ("sdk.bst:base.bst::app.bst", "sdk.bst [junction]/base.bst [junction x2]/app.bst"),
+    ("sdk.bst [junction]/base/lib.bst", "sdk.bst%20%5Bjunction%5D/base/lib.bst"),
+    ("sdk.bst%3Abase/lib.bst", "sdk.bst%253Abase/lib.bst"),
+])
+def test_junction_paths_preserve_exact_names(name, path):
+    assert vfs.element_path(name) == path
+    assert vfs.element_name(path) == name
+
+
+def test_junction_navigation_links_and_pull(descriptor, graph, tmp_path):
+    names = ["sdk.bst:ports/base.bst:lib.bst", "sdk.bst::ports/base.bst:lib.bst",
+             "sdk.bst/ports/base.bst/lib.bst", "sdk.bst [junction]/ports/base.bst/lib.bst"]
+    graph = Graph(names, {name: next(iter(graph.nodes.values())) for name in names}, {
+        (names[0], names[1]): frozenset({"build"}),
+        (names[1], names[0]): frozenset({"run"}),
+    }, {})
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="listing\n")
+
+    project = vfs.Project(descriptor, run=run)
+    project._graph = graph
+    entries = list(project.entries())
+    indexed = {entry.path: entry for entry in entries}
+    assert len(entries) == len(indexed)
+    for name in names:
+        assert f"all/targets/{vfs.element_path(name)}" in indexed
+        project.copyout(f"all/elements/{vfs.element_path(name)}/element.json", tmp_path / "out")
+        assert json.loads((tmp_path / "out").read_text())["name"] == name
+        project.copyout(f"all/elements/{vfs.element_path(name)}/artifact-pull.txt", tmp_path / "out")
+        assert calls[-2][-6:] == ["artifact", "pull", "--deps", "none", "--", name]
+    for entry in entries:
+        if entry.kind == "link":
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(entry.path), entry.target))
+            assert indexed[target].kind == "dir"
+
+
+@pytest.mark.parametrize("path", [
+    "sdk.bst%3Abase/lib.bst", "sdk.bst [junction]", "[junction]/lib.bst",
+    "sdk.bst [junction]/%2E%2E/lib.bst", "sdk.bst [junction x3]/lib.bst",
+])
+def test_noncanonical_junction_paths_are_rejected(path):
+    with pytest.raises(ValueError):
+        vfs.element_name(path)
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -157,7 +210,7 @@ def test_lazy_inspection_commands(descriptor, tmp_path, action, expected):
 
     project = vfs.Project(descriptor, run=run)
     output = tmp_path / "out"
-    project.copyout("all/elements/sdk.bst%3Abase/lib.bst/" + action, output)
+    project.copyout("all/elements/sdk.bst [junction]/base/lib.bst/" + action, output)
     assert output.read_text() == "file contents\n"
     assert calls == [["bst", "--no-colors", "--strict", "-C", descriptor["directory"],
                       "--option", "arch", "aarch64", *expected]]
@@ -354,3 +407,31 @@ def test_live_buildstream(tmp_path, monkeypatch):
                 assert stream.extractfile(member).read() == b"Hello from MC!\n"
         finally:
             server.stop(0).wait()
+
+
+@pytest.mark.skipif(os.environ.get("BST_MC_TEST_LIVE") != "1", reason="Requires bst and buildbox-casd")
+def test_live_nested_junction(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    root = tmp_path / "project"
+    for path, name in ((root, "main"), (root / "sdk", "sdk"), (root / "sdk/base", "base")):
+        (path / "elements").mkdir(parents=True)
+        (path / "project.conf").write_text(
+            f"name: {name}\nmin-version: '2.0'\nelement-path: elements\n"
+            "sandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+        )
+    # Junctions load in the first pass, before project sandbox defaults apply.
+    junction = "kind: junction\nsandbox:\n  build-os: linux\n  build-arch: aarch64\nsources:\n- kind: local\n"
+    (root / "elements/sdk.bst").write_text(junction + "  path: sdk\n")
+    (root / "sdk/elements/base.bst").write_text(junction + "  path: base\n")
+    (root / "sdk/base/elements/lib.bst").write_text("kind: manual\nconfig:\n  build-commands: [echo nested-junction]\n")
+    name = "sdk.bst:base.bst:lib.bst"
+    project = vfs.Project({"format_version": 1, "directory": str(root), "targets": [name], "options": []})
+    path = "sdk.bst [junction]/base.bst [junction]/lib.bst"
+    entries = {entry.path: entry for entry in project.entries()}
+    assert f"all/targets/{path}" in entries
+    output = tmp_path / "out"
+    project.copyout(f"all/elements/{path}/build-commands.txt", output)
+    assert "echo nested-junction" in output.read_text()
+    project.copyout(f"all/elements/{path}/element.json", output)
+    assert json.loads(output.read_text())["name"] == name

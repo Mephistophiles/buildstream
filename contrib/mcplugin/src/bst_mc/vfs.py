@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path, PurePosixPath
 import posixpath
+import re
 import shlex
 import shutil
 import subprocess
@@ -47,6 +48,7 @@ HELP = """BuildStream project in Midnight Commander (read-only)
 
 Enter all/, build/ or run/, then targets/ to start dependency navigation.
 elements/ groups elements by their project directories.
+Junctions are folders marked [junction]; nested junctions form nested folders.
 Enter dependencies/ or reverse-dependencies/ and follow element links.
 MC's Ctrl-s searches panel names. '..' goes up; Alt-y returns in directory history.
 tree.txt displays a bounded dependency tree, with build/run edge types.
@@ -86,11 +88,37 @@ def component(name):
 
 
 def element_path(name):
-    """Keep project directories as directories, escaping only each component."""
-    parts = name.split("/")
-    if any(part in ("", ".", "..") or "\x00" in part for part in parts):
-        raise ValueError("Invalid element path")
-    return "/".join(component(part) for part in parts)
+    """Render junction boundaries as marked directories, without losing names."""
+    sections = re.split(r"(::?)", name)
+    directories = []
+    for index in range(0, len(sections), 2):
+        parts = sections[index].split("/")
+        if any(part in ("", ".", "..") or "\x00" in part for part in parts):
+            raise ValueError("Invalid element path")
+        encoded = [component(part) for part in parts]
+        if index + 1 < len(sections):
+            # Public bst names use ':'. Keep a literal '::' distinguishable
+            # too, rather than silently normalizing what we pass back to bst.
+            encoded[-1] += " [junction]" if sections[index + 1] == ":" else " [junction x2]"
+        directories.extend(encoded)
+    return "/".join(directories)
+
+
+def element_name(path):
+    """Decode only our canonical VFS spelling, including junction markers."""
+    decoded = []
+    parts = path.split("/")
+    for index, part in enumerate(parts):
+        separator = "/" if index + 1 < len(parts) else ""
+        for marker, boundary in ((" [junction]", ":"), (" [junction x2]", "::")):
+            if part.endswith(marker):
+                part, separator = part[:-len(marker)], boundary
+                break
+        decoded.append(unquote(part) + separator)
+    name = "".join(decoded)
+    if element_path(name) != path:
+        raise ValueError("Invalid encoded element name")
+    return name
 
 
 def run_bst(arguments, **kwargs):
@@ -217,9 +245,7 @@ class Project:
             content = self.tree(parts[0])
         elif len(parts) >= 4 and parts[0] in SCOPES and parts[1] == "elements" and parts[-1] in ACTIONS:
             scope, encoded, action = parts[0], "/".join(parts[2:-1]), parts[-1]
-            name = unquote(encoded)
-            if element_path(name) != encoded:
-                raise ValueError("Invalid encoded element name")
+            name = element_name(encoded)
             if action in ("sources.tar", "artifact.tar"):
                 self.export(name, action, destination)
                 return
