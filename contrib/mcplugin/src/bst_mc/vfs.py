@@ -64,10 +64,12 @@ MC caches the result: free/reopen this VFS to run the action again or refresh
 previously viewed artifact-list.txt / artifact.tar.
 
 Enter sources.tar: bst source checkout --deps none --tar ...
-Enter artifact.tar: bst artifact checkout --deps none --no-integrate --tar ...
+Enter artifact.tar: pull if not cached, then
+bst artifact checkout --deps none --no-integrate --tar ...
 MC opens these nested tar archives; Enter browses directories, F3 views any
 file (including binary files), and F5 copies files to the other panel.
-Source checkout may fetch sources; artifact checkout may pull from remotes.
+Source checkout may fetch sources; artifact.tar automatically pulls missing
+artifacts from configured remotes with bst artifact pull --deps none.
 Neither action builds, tracks sources, or runs integration commands.
 Sources reflect BuildStream checkout semantics, including an open workspace.
 The whole element is exported on first access, so large elements may take time
@@ -274,6 +276,12 @@ class Project:
         Path(destination).write_text(content, encoding="utf-8")
 
     def export(self, name, action, destination):
+        if action == "artifact.tar":
+            # A cached artifact must remain browsable without configured remotes.
+            # Failed builds can also have cached artifacts worth inspecting.
+            state = self.inspector.show(name, "%{state}").strip()
+            if state not in ("cached", "failed"):
+                self.inspector.execute(["artifact", "pull", "--deps", "none", "--", name])
         # BuildStream requires a nonexistent output; MC provides an existing
         # temporary file. Stage separately and copy only a successful export.
         with tempfile.TemporaryDirectory(prefix="bst-mc-export-") as temporary:

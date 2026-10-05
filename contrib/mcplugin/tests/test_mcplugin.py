@@ -224,6 +224,8 @@ def test_exports_and_cleanup(descriptor, tmp_path, action, failure):
     def run(args, **kwargs):
         assert args[-2:] == ["--", "app.bst"]
         assert args[args.index("--deps") + 1] == "none"
+        if "show" in args:
+            return SimpleNamespace(returncode=0, stdout="cached\n")
         assert ("--no-integrate" in args) == (action == "artifact.tar")
         assert "--hardlinks" not in args
         archive = Path(args[args.index("--tar") + 1])
@@ -253,6 +255,54 @@ def test_exports_and_cleanup(descriptor, tmp_path, action, failure):
             assert stream.extractfile("dir/file with spaces.bin").read() == b"a\x00b\xffc"
     assert len(exports) == 1
     assert not exports[0].parent.exists()
+
+
+@pytest.mark.parametrize("state", ["cached", "failed", "fetch needed", "buildable", "waiting"])
+def test_artifact_export_pulls_only_when_missing(descriptor, tmp_path, state):
+    calls = []
+    name = "sdk.bst:base/lib.bst"
+    project = vfs.Project(descriptor)
+
+    def run(args, **kwargs):
+        command = args[len(project.inspector.base):]
+        calls.append(command)
+        if command[0] == "show":
+            return SimpleNamespace(returncode=0, stdout=state + "\n")
+        if command[:2] == ["artifact", "checkout"]:
+            Path(command[command.index("--tar") + 1]).write_bytes(b"artifact contents")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    project.inspector.run = run
+    output = tmp_path / "out"
+    project.copyout("all/elements/sdk.bst [junction]/base/lib.bst/artifact.tar", output)
+    assert output.read_bytes() == b"artifact contents"
+    expected = [["show", "--deps", "none", "--format", "%{state}", "--", name]]
+    if state not in ("cached", "failed"):
+        expected.append(["artifact", "pull", "--deps", "none", "--", name])
+    assert calls[:-1] == expected
+    assert calls[-1][:5] == ["artifact", "checkout", "--deps", "none", "--no-integrate"]
+    assert calls[-1][-2:] == ["--", name]
+
+
+@pytest.mark.parametrize("failure", ["show", "pull", "cancel"])
+def test_artifact_export_pull_failure_preserves_destination(descriptor, tmp_path, failure):
+    calls = []
+
+    def run(args, **kwargs):
+        command = "show" if "show" in args else "pull"
+        assert "checkout" not in args
+        calls.append(command)
+        if command == "pull" and failure == "cancel":
+            raise KeyboardInterrupt
+        return SimpleNamespace(returncode=int(command == failure), stdout="fetch needed\n")
+
+    project = vfs.Project(descriptor, run=run)
+    output = tmp_path / "out"
+    output.write_bytes(b"original")
+    with pytest.raises(KeyboardInterrupt if failure == "cancel" else ValueError):
+        project.copyout("all/elements/app.bst/artifact.tar", output)
+    assert output.read_bytes() == b"original"
+    assert calls == (["show"] if failure == "show" else ["show", "pull"])
 
 
 def test_paths_and_metadata(descriptor, graph, tmp_path):
@@ -398,13 +448,14 @@ def test_live_buildstream(tmp_path, monkeypatch):
             config.write_text(f"artifacts:\n  servers:\n  - url: {url}\n")
             with pytest.raises(ValueError):
                 project.copyout("all/elements/default/element/fo/files.bst/artifact-list.txt", output)
-            project.copyout("all/elements/default/element/fo/files.bst/artifact-pull.txt", output)
-            assert "Artifact pull completed" in output.read_text()
-            assert "hello world.txt" in output.read_text()
+            # Opening the archive must pull from the remote without the manual action.
             project.copyout("all/elements/default/element/fo/files.bst/artifact.tar", output)
             with tarfile.open(output) as stream:
                 member = next(item for item in stream.getmembers() if item.name.endswith("hello world.txt"))
                 assert stream.extractfile(member).read() == b"Hello from MC!\n"
+            project.copyout("all/elements/default/element/fo/files.bst/artifact-pull.txt", output)
+            assert "Artifact pull completed" in output.read_text()
+            assert "hello world.txt" in output.read_text()
         finally:
             server.stop(0).wait()
 
