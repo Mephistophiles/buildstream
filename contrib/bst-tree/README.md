@@ -41,8 +41,15 @@ action. You can use these shortcuts directly from the graph:
   Folders, file icons, highlighting, and sorting match the source browser.
   The selected file's full path, permissions, type, size, and symlink target are
   shown in the adjacent pane (`bst artifact list-contents`, plain and `--long`).
-  Missing artifacts produce an error in the viewer; no build or artifact pull
-  is started. This view displays file metadata, not file contents.
+  Press Enter on a regular file to preview its contents in the adjacent pane.
+  The first preview exports the artifact to a temporary tar archive using
+  `bst artifact checkout --deps none --no-integrate --tar …`; further previews
+  reuse that archive until the viewer closes. Files are read directly from the
+  archive without extracting them. The initial export can take time and disk
+  space for large artifacts; closing the viewer cancels it and removes the archive.
+  Listing requires a locally cached artifact. Checkout may retrieve missing data
+  through configured artifact remotes; no build or integration commands are run.
+  Symlinks display their targets and are not followed for previews.
 - `b`: show the resolved element configuration, including build commands where
   supported by its kind, plus variables and environment (`bst show`). These are
   the effective settings, rather than the original `.bst` YAML or a build log.
@@ -58,7 +65,7 @@ The viewers load on demand without blocking navigation back to the tree. Escape
 or `q` closes a viewer and cancels its pending command, preserving tree expansion
 and selection. Use Tab/Shift+Tab to switch between files and the text pane;
 ↑/↓ or `j`/`k` select files, ←/→ or `h`/`l` close/open directories, and Enter
-previews a source file.
+previews a source or artifact file.
 Page Up/Down scroll the focused widget. Press `i` to restore the source provenance
 or full artifact listing after inspecting a file. Text is read-only, previews
 are limited to 256 KiB, binary files are identified, and symlinks are not browsed.
@@ -201,7 +208,10 @@ artifact file tree. Temporary source checkouts use the public CLI rather than
 private CAS paths or mounts. Each screen owns its cancellable command runner;
 background results cannot update a closed screen. The checkout worker retains
 ownership of its temporary directory until the command finishes, so closing a
-screen cannot remove a directory while BuildStream is still writing it.
+screen cannot remove a directory while BuildStream is still writing it. Artifact
+previews export a temporary tar on demand, reuse it within the viewer, and read
+only bounded regular-file content. Preview requests are serialized, and a late
+result cannot replace a newer selection or the information view.
 `cli.py` supplies a factory for live projects, while snapshot browsing supplies
 none. The graph model and snapshot format are unchanged.
 

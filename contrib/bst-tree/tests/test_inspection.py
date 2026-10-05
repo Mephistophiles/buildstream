@@ -146,3 +146,75 @@ def test_failed_or_cancelled_checkout_removes_temporary_files(cancelled):
     with pytest.raises(ValueError):
         inspector.checkout_sources("code.bst")
     assert not checkout_paths[0].parent.exists()
+
+
+def test_artifact_previews_export_once_and_cleanup():
+    import io
+    from pathlib import Path
+    import tarfile
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        archive = Path(args[args.index("--tar") + 1])
+        with tarfile.open(archive, "w") as bundle:
+            for name, data in [("./usr/a [b].txt", b"artifact contents"),
+                               ("./binary", b"\x00\xff"), ("plain-name", b"plain")]:
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                bundle.addfile(member, io.BytesIO(data))
+            for name, kind in [("symlink", tarfile.SYMTYPE), ("hardlink", tarfile.LNKTYPE),
+                               ("directory", tarfile.DIRTYPE), ("fifo", tarfile.FIFOTYPE)]:
+                member = tarfile.TarInfo("./" + name)
+                member.type = kind
+                member.linkname = "/etc/passwd"
+                bundle.addfile(member)
+        return subprocess.CompletedProcess(args, 0, "")
+
+    inspector = ProjectInspector("/project with spaces", [("arch", "aarch64")], run=run)
+    assert inspector.preview_artifact("sub.bst:app.bst", "usr/a [b].txt") == "artifact contents"
+    assert "truncated" in inspector.preview_artifact("sub.bst:app.bst", "usr/a [b].txt", limit=4)
+    assert "Binary file" in inspector.preview_artifact("sub.bst:app.bst", "binary")
+    assert inspector.preview_artifact("sub.bst:app.bst", "plain-name") == "plain"
+    for name in ("symlink", "hardlink", "directory", "fifo"):
+        with pytest.raises(ValueError, match="regular files"):
+            inspector.preview_artifact("sub.bst:app.bst", name)
+    with pytest.raises(ValueError, match="no longer"):
+        inspector.preview_artifact("sub.bst:app.bst", "missing")
+    for path in ("/etc/passwd", "../outside"):
+        with pytest.raises(ValueError, match="outside"):
+            inspector.preview_artifact("sub.bst:app.bst", path)
+    assert len(calls) == 1
+    command = calls[0]
+    archive = Path(command[command.index("--tar") + 1])
+    assert command[-9:] == ["artifact", "checkout", "--deps", "none", "--no-integrate",
+                            "--tar", str(archive), "--", "sub.bst:app.bst"]
+    assert command[:8] == inspector.base
+    assert list(archive.parent.iterdir()) == [archive]  # No files extracted onto the host.
+    inspector.cancel()
+    assert not archive.parent.exists()
+    with pytest.raises(ValueError, match="cancelled"):
+        inspector.preview_artifact("sub.bst:app.bst", "plain-name")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_failed_artifact_preview_cleans_partial_archive(cancelled):
+    from pathlib import Path
+
+    archives = []
+
+    def run(args, **kwargs):
+        archive = Path(args[args.index("--tar") + 1])
+        archive.write_bytes(b"partial export")
+        archives.append(archive)
+        if cancelled:
+            inspector.cancel()
+            assert archive.exists()  # Cleanup must wait until the command returns.
+        return subprocess.CompletedProcess(args, 0 if cancelled else 1, "")
+
+    inspector = ProjectInspector(run=run)
+    with pytest.raises(ValueError):
+        inspector.preview_artifact("app.bst", "file")
+    assert not archives[0].parent.exists()

@@ -82,3 +82,6 @@ def test_live_buildstream(tmp_path, monkeypatch):
     assert "main.c" in contents.text
     assert [entry.path for entry in contents.artifacts] == ["main.c"]
     assert "reg" in contents.artifacts[0].details
+    assert inspector.preview_artifact("import.bst", "main.c") == "int main() {}\n"
+    assert inspector.preview_artifact("import.bst", "main.c", limit=4).startswith("int ")
+    inspector.cancel()

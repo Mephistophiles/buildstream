@@ -510,3 +510,97 @@ async def test_close_during_source_checkout():
         assert cancelled.is_set()
         assert finished.is_set()
         assert app.selected() == "app.bst"
+
+
+async def test_artifact_preview_and_retry():
+    class ArtifactInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Artifact overview", artifacts=[
+                ArtifactEntry("file.txt", "-rw-r--r-- reg 7 file.txt"),
+                ArtifactEntry("link", "lrwxrwxrwx link 0 link -> file.txt"),
+            ])
+
+        def preview_artifact(self, name, path):
+            self.calls.append((name, path))
+            if len(self.calls) == 1:
+                raise ValueError("Export failed")
+            return "Preview [text]\n" * 100
+
+    inspector = ArtifactInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        files = app.screen.query_one(ArtifactTree)
+        files.move_cursor(files.root.children[0])
+        await pilot.pause()
+        assert inspector.calls == []  # Selection only shows metadata.
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "Export failed" in app.screen.query_one(TextArea).text
+        await pilot.press("enter")
+        await pilot.pause()
+        preview = app.screen.query_one(TextArea)
+        assert preview.text == "Preview [text]\n" * 100
+        await pilot.press("tab", "pagedown")
+        assert app.focused is preview
+        assert preview.cursor_location[0] > 0
+        await pilot.press("shift+tab", "j", "enter")
+        assert "Symlink" in preview.text
+        assert inspector.calls == [("app.bst", "file.txt")] * 2
+        await pilot.press("i")
+        assert preview.text == "Artifact overview"
+        await pilot.press("escape")
+        assert inspector.cancelled
+        assert app.selected() == "app.bst"
+
+
+@pytest.mark.parametrize("finish", ["select", "info", "close"])
+async def test_pending_artifact_preview_does_not_replace_new_selection(finish):
+    import threading
+
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    class ArtifactInspector(FakeInspector):
+        def load(self, name, section):
+            return Inspection("Artifact overview", artifacts=[
+                ArtifactEntry("a", "-rw-r--r-- reg 1 a"),
+                ArtifactEntry("b", "-rw-r--r-- reg 2 b"),
+            ])
+
+        def preview_artifact(self, name, path):
+            started.set()
+            release.wait(timeout=5)
+            finished.set()
+            return "Late preview"
+
+        def cancel(self):
+            super().cancel()
+            release.set()
+
+    inspector = ArtifactInspector()
+    app = Explorer(graph=graph(), inspector_factory=lambda: inspector)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("a")
+        await pilot.pause()
+        files = app.screen.query_one(ArtifactTree)
+        files.move_cursor(files.root.children[0])
+        await pilot.press("enter")
+        await pilot.pause()
+        assert started.is_set()
+        assert "Loading preview" in app.screen.query_one(TextArea).text
+        await pilot.press({"select": "j", "info": "i", "close": "escape"}[finish])
+        release.set()
+        await pilot.pause()
+        assert finished.is_set()
+        if finish == "close":
+            assert inspector.cancelled
+            assert app.selected() == "app.bst"
+        else:
+            preview = app.screen.query_one(TextArea).text
+            assert "Late preview" not in preview
+            assert ("reg 2 b" if finish == "select" else "Artifact overview") in preview

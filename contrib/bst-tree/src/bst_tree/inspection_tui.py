@@ -179,13 +179,14 @@ class InspectionScreen(ModalScreen):
         self.can_checkout = False
         self.loading_sources = False
         self.information = ""
+        self.artifact_preview_lock = asyncio.Lock()
 
     def compose(self) -> ComposeResult:
         yield Static(f"{self.element_name} — {self.section}", id="inspection-title", markup=False)
         help_text = "↑↓ / PgUp / PgDn: scroll"
         if self.section != "build":
             help_text = "Tab: switch pane · ↑↓/jk: select · ←→/hl: folders · i: info"
-        if self.section == "sources":
+        if self.section in ("sources", "artifacts"):
             help_text += " · Enter: preview"
         yield Static(help_text, id="inspection-help", markup=False)
         yield Button("f  Load source files (may download)", id="load-sources")
@@ -277,12 +278,40 @@ class InspectionScreen(ModalScreen):
     def tree_event(self, event):
         event.stop()
         if isinstance(event.control, ArtifactTree):
+            self.preview_generation += 1
             if event.node.data:
                 entry = event.node.data
                 self.query_one("#inspection-title", Static).update(f"{self.element_name} — {entry.path}")
                 self.query_one(TextArea).load_text(f"{entry.path}\n\n{entry.details}")
+                if isinstance(event, Tree.NodeSelected) and not entry.directory:
+                    self.preview_artifact(entry)
             else:
                 self.action_information()
+
+    def preview_artifact(self, entry):
+        if entry.details.startswith("l"):
+            self.query_one(TextArea).load_text(f"{entry.details}\n\nSymlink; preview does not follow links.")
+            return
+        generation = self.preview_generation
+        self.query_one(TextArea).load_text(
+            f"Loading preview: {entry.path}\n"
+            "The first preview exports this artifact to a temporary archive.\nEsc cancels."
+        )
+
+        async def read():
+            # Finish one export before starting another read, and discard
+            # obsolete requests if selection changed while waiting.
+            async with self.artifact_preview_lock:
+                if self.closed or generation != self.preview_generation:
+                    return
+                try:
+                    content = await asyncio.to_thread(self.inspector.preview_artifact, self.element_name, entry.path)
+                except Exception as error:
+                    content = f"Unable to preview file: {error}"
+            if not self.closed and generation == self.preview_generation:
+                self.query_one(TextArea).load_text(content)
+
+        self.run_worker(read())
 
     @on(DirectoryTree.FileSelected)
     async def file_selected(self, event):

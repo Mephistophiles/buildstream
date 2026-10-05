@@ -14,12 +14,13 @@
 """On-demand element inspection through public BuildStream commands."""
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 import shlex
 import tempfile
 import threading
 import subprocess
+import tarfile
 
 from .adapter import command_base
 
@@ -47,14 +48,51 @@ class ProjectInspector:
         self._lock = threading.Lock()
         self._cancelled = False
         self._checkout = None
+        self._artifact_previews = {}
+        self._preview_lock = threading.Lock()
 
     def cancel(self):
         with self._lock:
             self._cancelled = True
             checkout, self._checkout = self._checkout, None
+            archives, self._artifact_previews = self._artifact_previews, {}
         self._cancel()
         if checkout:
             checkout.cleanup()
+        for temporary, _ in archives.values():
+            temporary.cleanup()
+
+    def preview_artifact(self, name, path, limit=256 * 1024):
+        """Export once per viewer; read regular members without extracting them."""
+        member_path = PurePosixPath(path)
+        if member_path.is_absolute() or ".." in member_path.parts:
+            raise ValueError("File is outside the artifact")
+        # The runner owns a single subprocess. Repeated Enter presses must not
+        # start overlapping exports or race ownership of temporary archives.
+        with self._preview_lock:
+            with self._lock:
+                if self._cancelled:
+                    raise ValueError("Loading cancelled")
+                cached = self._artifact_previews.get(name)
+            if cached is None:
+                temporary = tempfile.TemporaryDirectory(prefix="bst-tree-artifact-")
+                archive = Path(temporary.name) / "artifact.tar"
+                try:
+                    self.execute([
+                        "artifact", "checkout", "--deps", "none", "--no-integrate",
+                        "--tar", str(archive), "--", name,
+                    ])
+                    # As with sources, the worker owns cleanup until bst exits.
+                    with self._lock:
+                        if self._cancelled:
+                            raise ValueError("Loading cancelled")
+                        self._artifact_previews[name] = (temporary, archive)
+                except BaseException:
+                    temporary.cleanup()
+                    raise
+            else:
+                _, archive = cached
+            return preview_archive(archive, member_path.as_posix(), limit)
 
     def checkout_command(self, name, directory):
         return ["source", "checkout", "--deps", "none", "--directory", str(directory), "--", name]
@@ -142,7 +180,27 @@ def preview_file(root, path, limit=256 * 1024):
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError("Only regular files can be previewed")
     with path.open("rb") as stream:
-        content = stream.read(limit + 1)
+        return preview_stream(stream, limit)
+
+
+def preview_archive(archive, path, limit=256 * 1024):
+    with tarfile.open(archive, "r:") as bundle:
+        try:
+            member = bundle.getmember("./" + path)
+        except KeyError:
+            try:
+                member = bundle.getmember(path)
+            except KeyError:
+                raise ValueError(f"File is no longer in the artifact: {path}") from None
+        # Never resolve symlink or hardlink targets, or open special files.
+        if not member.isfile():
+            raise ValueError("Only regular files can be previewed; links are not followed")
+        with bundle.extractfile(member) as stream:
+            return preview_stream(stream, limit)
+
+
+def preview_stream(stream, limit):
+    content = stream.read(limit + 1)
     if b"\x00" in content:
         return "Binary file; text preview unavailable."
     text = content[:limit].decode("utf-8", errors="replace")
