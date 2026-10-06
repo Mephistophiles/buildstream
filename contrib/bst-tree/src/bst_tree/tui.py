@@ -294,6 +294,29 @@ class Explorer(App):
             self.saved_tree = (expanded, tree.cursor_node.data)
             self.reverse_root = name
             self.rebuild()
+            # Reveal direct consumers immediately; deeper branches remain lazy.
+            # clear() resets the cursor to the synthetic root, so select the
+            # element again to keep navigation and a second 'r' useful.
+            root = tree.root.children[0]
+            root.expand()
+
+            def select_root():
+                # Tree line numbers are rebuilt on refresh, not on add/expand.
+                if self.is_current_node(root):
+                    tree.move_cursor(root)
+                    tree.scroll_to_node(root)
+
+            self.call_after_refresh(select_root)
+            count = len(self.adjacency[name])
+            message = (
+                f"{count} direct reverse dependencies of {name}"
+                if count else f"No reverse dependencies of {name}"
+            )
+            self.query_one("#status", Static).update(
+                f"{message} in the loaded graph (scope={self.scope}); r/Escape to return"
+            )
+        else:
+            self.query_one("#status", Static).update("Select an element first")
 
     def action_back(self):
         search = self.query_one(Input)

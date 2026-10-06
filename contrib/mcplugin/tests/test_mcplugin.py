@@ -210,6 +210,10 @@ def test_exports_and_cleanup(descriptor, tmp_path, action, failure):
             info = tarfile.TarInfo("dir/file with spaces.bin")
             info.size = 5
             stream.addfile(info, io.BytesIO(b"a\x00b\xffc"))
+            for name in (".env", ".config/.settings", "dir/.hidden"):
+                info = tarfile.TarInfo(name)
+                info.size = len(b"hidden content")
+                stream.addfile(info, io.BytesIO(b"hidden content"))
         return SimpleNamespace(returncode=0, stdout="diagnostics must not replace tar bytes")
 
     project = vfs.Project(descriptor, run=run)
@@ -223,6 +227,8 @@ def test_exports_and_cleanup(descriptor, tmp_path, action, failure):
         project.copyout("all/elements/app.bst/" + action, output)
         with tarfile.open(output) as stream:
             assert stream.extractfile("dir/file with spaces.bin").read() == b"a\x00b\xffc"
+            for name in (".env", ".config/.settings", "dir/.hidden"):
+                assert stream.extractfile(name).read() == b"hidden content"
     assert len(exports) == 1
     assert not exports[0].parent.exists()
 

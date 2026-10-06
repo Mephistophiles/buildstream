@@ -84,9 +84,18 @@ async def test_reverse_children_and_cycle_guard():
         await pilot.pause()
         tree = app.query_one(Tree)
         root = tree.root.children[0]
-        root.expand()
-        await pilot.pause()
+        assert root.is_expanded
+        assert tree.cursor_node is root
         assert {child.data[-1] for child in root.children} == {"app.bst", "compiler.bst"}
+        assert all(not child.is_expanded for child in root.children)
+        await pilot.press("down", "right")
+        await pilot.pause()
+        cycle = root.children[0].children[0]
+        assert cycle.data[-1] == "sub:lib.bst"
+        assert not cycle.allow_expand
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.selected() == "sub:lib.bst"
 
 
 async def test_quit_cancels_loader():
@@ -726,3 +735,65 @@ async def test_pending_artifact_preview_does_not_replace_new_selection(finish):
             preview = app.screen.query_one(TextArea).text
             assert "Late preview" not in preview
             assert ("reg 2 b" if finish == "select" else "Artifact overview") in preview
+
+
+@pytest.mark.parametrize("scope,expected", [("all", {"app.bst", "compiler.bst"}), ("run", {"app.bst"})])
+async def test_reverse_opens_consumers_in_selected_scope(scope, expected):
+    app = Explorer(graph=graph())
+    app.scope = scope
+    async with app.run_test() as pilot:
+        await app.reveal(["app.bst", "sub:lib.bst"])
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        root = app.query_one(Tree).root.children[0]
+        assert root.is_expanded
+        assert {child.data[-1] for child in root.children} == expected
+        assert app.selected() == "sub:lib.bst"
+        await pilot.press("r")
+        await pilot.pause()
+        assert app.reverse_root is None
+        assert app.selected() == "sub:lib.bst"
+
+
+async def test_reverse_without_consumers_explains_scope():
+    app = Explorer(graph=graph())
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.move_cursor(tree.root)
+        await pilot.press("r")
+        assert "Select an element" in str(app.query_one("#status", Static).render())
+        tree.move_cursor(tree.root.children[0])
+        await pilot.press("r")
+        await pilot.pause()
+        assert "No reverse dependencies" in str(app.query_one("#status", Static).render())
+        assert "loaded graph" in str(app.query_one("#status", Static).render())
+        assert app.selected() == "app.bst"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.reverse_root is None
+
+
+async def test_source_browser_includes_dotfiles_and_hidden_directories(tmp_path):
+    (tmp_path / ".config").mkdir()
+    (tmp_path / ".config" / ".settings").write_text("hidden nested content")
+    (tmp_path / ".env").write_text("hidden source content")
+    app = Explorer(graph=graph(), inspector_factory=lambda: FakeInspector(workspace=tmp_path))
+    async with app.run_test() as pilot:
+        app.query_one(Tree).move_cursor(app.query_one(Tree).root.children[0])
+        await pilot.press("s")
+        await pilot.pause()
+        files = app.screen.query_one(WorkspaceTree)
+        await pilot.pause()
+        entries = {child.data.path.name: child for child in files.root.children}
+        assert set(entries) == {".config", ".env"}
+        files.select_node(entries[".env"])
+        await pilot.pause()
+        assert app.screen.query_one(TextArea).text == "hidden source content"
+        entries[".config"].expand()
+        await pilot.pause()
+        hidden = entries[".config"].children[0]
+        assert hidden.data.path.name == ".settings"
+        files.select_node(hidden)
+        await pilot.pause()
+        assert app.screen.query_one(TextArea).text == "hidden nested content"

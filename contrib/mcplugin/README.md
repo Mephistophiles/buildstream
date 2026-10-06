@@ -155,6 +155,26 @@ available commands depend on the element kind. Inside either archive, Enter
 browses directories, F3 views files (including binary files), and F5 copies files
 to the other panel. Artifact contents are browsed directly through `artifact.tar`.
 
+### Hidden source files
+
+The plugin does not filter dotfiles or hidden directories from `sources.tar` or
+`artifact.tar`. MC's panel settings apply inside archives too: press **Alt-.**
+(the default ShowHidden binding) or enable **Show hidden files** in MC's panel
+options. A custom keymap may use a different shortcut.
+
+To distinguish a panel setting from missing checkout contents, export the same
+virtual archive outside MC and inspect its member names:
+
+```sh
+bstmc copyout /tmp/project.bstmc all/elements/app.bst/sources.tar /tmp/sources.tar
+tar -tf /tmp/sources.tar
+```
+
+Use your bookmark and element path. If a file exists in the tar but is absent
+from the panel, check MC's hidden-file setting and panel filters. If it is absent
+from the tar, check the element's sources and `bst source checkout` output; a
+checkout is not a copy of every file in the project directory.
+
 ## Downloads, caching, and refresh
 
 Opening the project loads the graph. Inspection and exports happen only when

@@ -56,7 +56,7 @@ def test_roundtrip_and_determinism(tmp_path):
     write_snapshot(read_snapshot(first), second)
     assert first.read_bytes() == second.read_bytes()
     assert not has_changes(compare(g, read_snapshot(first)))
-    assert list(tmp_path.iterdir()) == [first, second]
+    assert set(tmp_path.iterdir()) == {first, second}
 
 
 @pytest.mark.parametrize(

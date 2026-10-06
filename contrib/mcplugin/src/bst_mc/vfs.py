@@ -67,6 +67,8 @@ Enter artifact.tar: pull if not cached, then
 bst artifact checkout --deps none --no-integrate --tar ...
 Inside an archive, Enter browses folders, F3 views files, and F5 copies them
 into the other panel. Binary files can also be opened in MC's viewer.
+Missing dotfiles? Enable Show hidden files in MC's panel options (Alt-. with
+its default keymap). The plugin does not filter hidden archive entries.
 
 DOWNLOADS AND LIMITATIONS
 The entire selected element is exported on first access, without dependencies.

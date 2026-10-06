@@ -56,8 +56,16 @@ Arrow keys or `hjkl` navigate; Enter/Space toggle a branch. `/` searches all ele
 names, including collapsed branches; `n`/`N` visit matches. `Shift+S` cycles all/run/build
 scope. Build scope includes direct build dependencies and their runtime closure,
 with the target retained as a visual root. `r` shows reverse dependencies of the
-selected element, Escape restores the previous tree, `w` shows one shortest path
+selected element with its direct consumers expanded and the element selected.
+Deeper branches remain lazy; `r` again or Escape restores the previous tree, `w` shows one shortest path
 from each applicable target, and `q` exits (cancelling a pending load).
+
+Reverse dependencies are limited to the graph loaded from the requested targets
+and the current scope. Opening `lib.bst` alone loads its dependencies, not every
+consumer elsewhere in the project. Include the relevant top-level targets when
+launching the browser (or creating a snapshot) to include those consumers. An
+empty reverse view explicitly reports that no consumers exist in the loaded
+scope.
 
 Children are materialized only when expanded. Shared dependencies may be explored
 under multiple parents. Reverse dependencies and paths refer to the selected scope.
@@ -105,6 +113,8 @@ previews a source or artifact file.
 Page Up/Down scroll the focused widget. Press `i` to restore the source provenance
 or full artifact listing after inspecting a file. Text is read-only, previews
 are limited to 256 KiB, binary files are identified, and symlinks are not browsed.
+Dotfiles and hidden directories are included in the source browser, for both
+workspaces and temporary checkouts. Symlinks remain excluded from that browser.
 Workspace contents reflect current local edits, not necessarily the built artifact.
 Each reopened viewer queries the live project again using the same directory,
 options, and strict mode as graph loading. Snapshot browsing keeps these actions
