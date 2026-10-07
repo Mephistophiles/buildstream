@@ -197,6 +197,7 @@ def test_exports_and_cleanup(descriptor, tmp_path, action, failure):
         if "show" in args:
             return SimpleNamespace(returncode=0, stdout="cached\n")
         assert ("--no-integrate" in args) == (action == "artifact.tar")
+        assert ("--include-build-scripts" in args) == (action == "sources.tar")
         assert "--hardlinks" not in args
         archive = Path(args[args.index("--tar") + 1])
         assert not archive.exists()

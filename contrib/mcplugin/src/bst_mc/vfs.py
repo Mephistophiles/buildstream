@@ -62,7 +62,7 @@ F3 on element.json: original name, kind, key, provenance, workspace presence.
 F3 on source-info.txt: source provenance from bst show.
 F3 on build-commands.txt: resolved configuration, variables, and environment.
 Build commands are effective settings, not the original YAML or a build log.
-Enter sources.tar: bst source checkout --deps none --tar ...
+Enter sources.tar: bst source checkout --deps none --include-build-scripts --tar ...
 Enter artifact.tar: pull if not cached, then
 bst artifact checkout --deps none --no-integrate --tar ...
 Inside an archive, Enter browses folders, F3 views files, and F5 copies them
@@ -290,6 +290,8 @@ class Project:
             command = ["source" if action == "sources.tar" else "artifact", "checkout", "--deps", "none"]
             if action == "artifact.tar":
                 command.append("--no-integrate")
+            else:
+                command.append("--include-build-scripts")
             self.inspector.execute([*command, "--tar", str(archive), "--", name])
             shutil.copyfile(archive, destination)
 

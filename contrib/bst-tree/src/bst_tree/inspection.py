@@ -113,7 +113,8 @@ class ProjectInspector:
             return result
 
     def checkout_command(self, name, directory):
-        return ["source", "checkout", "--deps", "none", "--directory", str(directory), "--", name]
+        return ["source", "checkout", "--deps", "none", "--include-build-scripts",
+                "--directory", str(directory), "--", name]
 
     def checkout_sources(self, name):
         # Keep ownership in the worker until the command finishes. Closing the

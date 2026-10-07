@@ -172,7 +172,7 @@ def test_source_checkout_cleanup_and_command():
     inspector = ProjectInspector("/project with spaces", [("arch", "aarch64")], run=run)
     result = inspector.checkout_sources("junction.bst:code.bst")
     assert preview_file(result.workspace, result.workspace / "hello.c") == "hello"
-    assert calls[0][-8:] == ["source", "checkout", "--deps", "none", "--directory",
+    assert calls[0][-9:] == ["source", "checkout", "--deps", "none", "--include-build-scripts", "--directory",
                             str(result.workspace), "--", "junction.bst:code.bst"]
     assert "'" in result.text  # Shell-quoted project path in the reproducible command.
     inspector.cancel()

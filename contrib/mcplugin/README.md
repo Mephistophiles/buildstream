@@ -147,7 +147,7 @@ Each element directory contains:
 | `paths.txt` | F3: one shortest path from each applicable target in the selected scope |
 | `source-info.txt` | F3: source provenance from `bst show --format '%{source-info}'` |
 | `build-commands.txt` | F3: resolved configuration, variables, and environment from `bst show` |
-| `sources.tar` | Enter: export with `bst source checkout --deps none --tar …` |
+| `sources.tar` | Enter: export with `bst source checkout --deps none --include-build-scripts --tar …` |
 | `artifact.tar` | Enter: pull the artifact if missing, then export with `bst artifact checkout --deps none --no-integrate --tar …` |
 
 Build commands are effective settings, not the original YAML or a build log;
@@ -182,7 +182,7 @@ you open or copy a virtual file. Each archive exports the **entire selected
 element**, without dependencies; large elements can take time and temporary
 disk space even when you only want one file.
 
-- `sources.tar` may fetch missing sources. Open workspaces follow BuildStream's
+- `sources.tar` includes generated build scripts without executing them and may fetch missing sources. Open workspaces follow BuildStream's
   source-checkout semantics, so contents need not match an already built artifact.
 - `artifact.tar` automatically runs `bst artifact pull --deps none` for an
   uncached element, using configured remotes and project options. Cached artifacts

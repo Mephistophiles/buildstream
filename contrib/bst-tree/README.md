@@ -99,7 +99,8 @@ action. You can use these shortcuts directly from the graph:
   the effective settings, rather than the original `.bst` YAML or a build log.
 - `s`: show source provenance and browse files directly in an existing workspace.
   Without a workspace, press `f` or choose **Load source files** to create a
-  temporary `bst source checkout --deps none` and browse it. The source view
+  temporary `bst source checkout --deps none --include-build-scripts` and browse it.
+  The checkout includes generated build scripts; these are not executed. The source view
   explains the operation and shows its command with the project's options.
   BuildStream uses its source cache and fetches missing sources from configured
   remotes or upstream. The temporary checkout is removed on close, cancellation,
