@@ -69,10 +69,11 @@ def test_real_buildstream_cas_shared_between_tools(tmp_path, monkeypatch, capsys
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert rows[0]["content_comparison"] == "identical"
     assert rows[-1]["coverage"]["cas_index"]["trees"] == 1
+    assert rows[-1]["coverage"]["cas_index"]["identity_queries"] == 2
     assert grep([*args, "--in", "artifacts", "--deps", "run", "--json", "-g", "*.txt", "needle", "product.bst"]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert rows[-1]["matched_files"] == 2 and rows[-1]["complete"]
-    assert rows[-1]["cas_index"]["hits"] == 2
+    assert rows[-1]["cas_index"]["hits"] == 1
     for iteration in range(2):
         assert elf([*args, "--deps", "none", "--json", "--check", "one.bst"]) == 0
         report = json.loads(capsys.readouterr().out)
@@ -89,6 +90,18 @@ def test_real_buildstream_cas_shared_between_tools(tmp_path, monkeypatch, capsys
     with Index(cas, database) as index:
         assert index.stats()["trees"] == 1
         assert index.stats()["analyses"] == 2
+
+    from bst_cas.benchmark import measure
+    from bst_tools_core.project import Project
+
+    adapter = Project(project)
+    keys = {
+        r["name"].strip(): r["full-key"].strip() for r in adapter.report(["one.bst", "two.bst"], ("name", "full-key"))
+    }
+    benchmark = measure(adapter, cas, keys)
+    print(json.dumps(benchmark, sort_keys=True))
+    assert benchmark["equivalent"]
+    assert [row["identity_queries"] for row in benchmark["measurements"]] == [4, 4, 2, 2]
 
     # A changed element must introduce a new digest without retaining a stale
     # owner binding. Existing content analyses remain reusable.

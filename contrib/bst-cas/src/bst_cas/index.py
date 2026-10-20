@@ -111,6 +111,7 @@ class Index:
             self.close()
             raise
         self.hits = self.misses = self.analysis_hits = self.analysis_misses = 0
+        self.identity_queries = self.shared_tree_reuses = 0
 
     def __enter__(self):
         return self
@@ -305,6 +306,8 @@ class Index:
             "misses": self.misses,
             "analysis_hits": self.analysis_hits,
             "analysis_misses": self.analysis_misses,
+            "identity_queries": self.identity_queries,
+            "shared_tree_reuses": self.shared_tree_reuses,
         }
 
     @database_errors
@@ -325,19 +328,10 @@ class Index:
 
 
 def load_artifact(index, project, name, expected_key=None):
-    """Bind a reusable tree to a current owner using public bst show, twice."""
+    """Single-owner convenience API using the same checked batch implementation."""
+    from .batch import load_artifacts
 
-    def identity():
-        records = project.report([name], ("full-key", "artifact-cas-digest"))
-        if len(records) != 1:
-            raise ValueError("Expected one artifact identity")
-        return {key: value.strip() for key, value in records[0].items()}
-
-    before = identity()
-    digest_parts(before["artifact-cas-digest"])
-    if expected_key is not None and before["full-key"] != expected_key:
-        raise ValueError("Project key changed while indexing; retry")
-    entries = index.tree(before["artifact-cas-digest"])
-    if identity() != before:
-        raise ValueError("Artifact identity changed while indexing; retry")
-    return entries, before
+    _, entries, identity, error = next(load_artifacts(index, project, [name], {name: expected_key}))
+    if error:
+        raise ValueError(error)
+    return entries, identity

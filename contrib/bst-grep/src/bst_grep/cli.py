@@ -208,7 +208,17 @@ def _run(args, output, cas):
     paths = project.paths(args.targets, args.deps) if args.why else None
     matched_lines, matched_files = 0, set()
     searched = failed = 0
-    for index, (name, workspace) in enumerate(sorted(selected.items()), 1):
+    prepared = ((name, None, None, None) for name in sorted(selected))
+    if cas is not None:
+        from bst_cas import load_artifacts
+
+        prepared = load_artifacts(cas, project, selected)
+    for index, (name, manifest, identity, problem) in enumerate(prepared, 1):
+        workspace = selected[name]
+        if problem:
+            failed += 1
+            output.emit({"type": "error", "element": name, "message": problem})
+            continue
         if sys.stderr.isatty():
             action = "workspace" if workspace else "source checkout (may fetch)"
             if args.area == "config":
@@ -219,7 +229,7 @@ def _run(args, output, cas):
         if args.area == "artifacts":
             from bst_cas.integration import artifact_files
 
-            contents = artifact_files(cas, project, name)
+            contents = artifact_files(cas, project, name, loaded=(manifest, identity))
         else:
             contents = project.sources(name, workspace) if args.area == "sources" else project.configuration(name)
         try:

@@ -42,8 +42,9 @@ Directory metadata. Future layout/hash changes require an adapter update.
 - Tree inventories are keyed by SHA-256 **hash and size**, rather than element
   names, paths, options or cache keys. Different owners of identical trees share
   one record. Ownership and dependency paths are supplied by the current graph.
-- Each live artifact's full key and digest are checked before and after loading
-  its inventory. Changes are reported as incomplete, rather than attributed to
+- Live full keys and digests are checked before and after each bounded batch
+  of up to 64 artifacts (24 KiB target argument budget). Identical tree digests
+  are loaded/validated once per batch, preserving separate owner records. Changes are reported as incomplete, rather than attributed to
   an old owner. A graph-wide atomic snapshot is not claimed.
 - ELF metadata is keyed by the file digest and a versioned parser namespace,
   including the pyelftools version. Changed trees can reuse unchanged files.
@@ -139,3 +140,30 @@ BST_CAS_TEST_LIVE=1 python -m pytest -c contrib/bst-cas/pyproject.toml contrib/b
 Tests cover cross-owner reuse, digest changes, parser namespaces, checksum
 failures, CAS garbage collection, safe path handling, concurrency, atomic
 failure behavior, all four consumers and real BuildStream CAS artifacts.
+
+## Batch query performance
+
+All four consumers use the same bounded identity batches. A successful selection
+of N artifacts normally needs `2 * ceil(N / 64)` identity queries, rather than
+`2 * N`; long qualified names can lower the batch size. Failed queries are
+bisected to retain unaffected owners. Nothing from a batch is published before
+the second identity query. Shared trees are revalidated in later batches, so
+concurrent CAS garbage collection still produces incomplete coverage.
+
+`identity_queries` and `shared_tree_reuses` are reported in JSON statistics.
+`hits`/`misses` count actual persistent tree loads, not repeated owners. A test
+with 257 qualified owners uses 10 identity queries and five tree validations,
+with distinct ownership preserved. This is an operation-count result, not a
+wall-time promise for a particular project.
+
+With the tool suite installed, measure the actual cold/warm derived index on
+your project, including BuildStream startup and project loading:
+
+```sh
+python -m bst_cas.benchmark -C /project --cas-directory /actual/cachedir/cas --deps run product.bst
+```
+
+The benchmark emits JSON for single-owner and batched modes and checks their
+identities/inventory counts agree. It creates only temporary derived databases;
+it does not flush OS/BuildStream caches, build targets, pull artifacts or modify
+CAS. A live integration test also exercises this benchmark on real artifacts.

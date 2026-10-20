@@ -22,7 +22,7 @@ import tempfile
 import threading
 
 from .adapter import capture
-from bst_tools_core.project import command_base
+from bst_tools_core.project import command_base, Project
 from bst_tools_core.archive import Archive, FILE_KINDS
 from bst_tools_core.cli import positive_int
 from bst_tools_core.process import CliRunner
@@ -196,75 +196,61 @@ def _run_size(args, cas):
         graph = graph.scoped(args.scope)
         manifests = {}
         errors = []
-        with tempfile.TemporaryDirectory(prefix="bst-tree-size-") as root:
-            for index, (name, node) in enumerate(sorted(graph.nodes.items())):
-                if node["kind"] in ("stack", "junction"):
-                    continue
-                path = Path(archives[name]) if name in archives else Path(root) / (str(index) + ".tar")
-                try:
-                    if cas is not None and not args.archive:
-                        from bst_cas import load_artifact
+        if cas is not None and not args.archive:
+            from bst_cas import load_artifacts
 
-                        class Project:
-                            def report(self, targets, fields):
-                                output = runner(
-                                    command_base(args.directory, args.option)
-                                    + [
-                                        "show",
-                                        "--deps",
-                                        "none",
-                                        "--format",
-                                        "%{full-key}\n%{artifact-cas-digest}",
-                                        "--",
-                                        *targets,
-                                    ]
-                                ).stdout
-                                lines = output.strip().splitlines()
-                                if len(lines) != 2:
-                                    raise ValueError(
-                                        "Expected an artifact key and CAS digest; artifact may be unavailable"
-                                    )
-                                return [dict(zip(fields, lines))]
-
-                        entries, identity = load_artifact(cas, Project(), name, node["key"])
-                        manifests[name] = {
-                            entry["path"].lstrip("/"): {
-                                "type": entry["kind"],
-                                "size": entry["size"],
-                                "sha256": entry.get("digest", "").split("/")[0],
-                            }
-                            for entry in entries
+            project = Project(args.directory, args.option, run=lambda argv: runner(argv).stdout)
+            keys = {
+                name: node["key"] for name, node in graph.nodes.items() if node["kind"] not in ("stack", "junction")
+            }
+            for name, entries, identity, error in load_artifacts(cas, project, keys, keys):
+                if error:
+                    errors.append({"element": name, "message": error})
+                else:
+                    manifests[name] = {
+                        entry["path"].lstrip("/"): {
+                            "type": entry["kind"],
+                            "size": entry["size"],
+                            "sha256": entry.get("digest", "").split("/")[0],
                         }
+                        for entry in entries
+                    }
+        else:
+            with tempfile.TemporaryDirectory(prefix="bst-tree-size-") as root:
+                for index, (name, node) in enumerate(sorted(graph.nodes.items())):
+                    if node["kind"] in ("stack", "junction"):
                         continue
-                    if not args.archive:
-                        runner(
-                            command_base(args.directory, args.option)
-                            + [
-                                "artifact",
-                                "checkout",
-                                "--deps",
-                                "none",
-                                "--no-integrate",
-                                "--tar",
-                                str(path),
-                                "--",
-                                name,
-                            ]
-                        )
-                        key = runner(
-                            command_base(args.directory, args.option)
-                            + ["show", "--deps", "none", "--format", "%{full-key}", "--", name]
-                        ).stdout.strip()
-                        if key != node["key"]:
-                            raise ValueError("Artifact/project key changed while exporting; retry")
-                    elif name not in archives:
-                        continue
-                    manifests[name] = Archive(path, cancelled).scan().entries
-                except (OSError, ValueError, tarfile.TarError, EOFError) as error:
-                    errors.append({"element": name, "message": str(error)})
-                finally:
-                    if not args.archive:
-                        path.unlink(missing_ok=True)
+                    path = Path(archives[name]) if name in archives else Path(root) / (str(index) + ".tar")
+                    try:
+                        if not args.archive:
+                            runner(
+                                command_base(args.directory, args.option)
+                                + [
+                                    "artifact",
+                                    "checkout",
+                                    "--deps",
+                                    "none",
+                                    "--no-integrate",
+                                    "--tar",
+                                    str(path),
+                                    "--",
+                                    name,
+                                ]
+                            )
+                            key = runner(
+                                command_base(args.directory, args.option)
+                                + ["show", "--deps", "none", "--format", "%{full-key}", "--", name]
+                            ).stdout.strip()
+                            if key != node["key"]:
+                                raise ValueError("Artifact/project key changed while exporting; retry")
+                        elif name not in archives:
+                            continue
+                        manifests[name] = Archive(path, cancelled).scan().entries
+                    except (OSError, ValueError, tarfile.TarError, EOFError) as error:
+                        errors.append({"element": name, "message": str(error)})
+                    finally:
+                        if not args.archive:
+                            path.unlink(missing_ok=True)
         report = size_report(graph, manifests, errors)
         report["scope"] = args.scope
         if cas is not None:

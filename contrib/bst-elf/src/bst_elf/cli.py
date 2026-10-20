@@ -119,15 +119,24 @@ def collect(args, runner, cas=None):
                 coverage["missing"].append({"owner": name, "state": node["state"]})
             else:
                 inputs.append((name, None))
+    prepared = ((name, None, None, None) for name, _ in inputs)
+    if project and cas is not None:
+        from bst_cas import load_artifacts
+
+        prepared = load_artifacts(
+            cas, project, [name for name, _ in inputs], {name: graph.nodes[name]["full-key"] for name, _ in inputs}
+        )
+    archives = dict(inputs)
     with tempfile.TemporaryDirectory(prefix="bst-elf-") as directory:
-        for index, (owner, archive) in enumerate(inputs):
+        for index, (owner, manifest, identity, problem) in enumerate(prepared):
+            archive = archives[owner]
             try:
+                if problem:
+                    raise ValueError(problem)
                 if project and cas is not None:
-                    from bst_cas import load_artifact
                     from bst_cas.integration import elf_entries
                     import elftools
 
-                    manifest, identity = load_artifact(cas, project, owner, graph.nodes[owner]["full-key"])
                     before = [identity]
                     records, errors = elf_entries(
                         cas,

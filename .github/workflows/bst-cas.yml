@@ -21,7 +21,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap gcc ripgrep
       - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-cas[test]' './contrib/bst-elf[test]' './contrib/bst-blame[test]' './contrib/bst-grep[test]' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0'
       - name: Shared index, consumers, and real BuildStream CAS
-        run: python -m pytest -c contrib/bst-cas/pyproject.toml contrib/bst-cas/tests
+        run: python -m pytest -c contrib/bst-cas/pyproject.toml contrib/bst-cas/tests -rP
         env:
           BST_CAS_TEST_LIVE: "1"
       - name: Independent consumer regression suites

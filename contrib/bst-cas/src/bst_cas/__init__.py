@@ -14,6 +14,7 @@
 """Shared derived CAS index. Target files and the BuildStream cache are never modified."""
 
 from .index import Index, load_artifact
+from .batch import load_artifacts
 
 __version__ = "0.1.0"
-__all__ = ["Index", "load_artifact"]
+__all__ = ["Index", "load_artifact", "load_artifacts"]

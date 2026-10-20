@@ -121,15 +121,7 @@ def collect(project, graph, pattern, glob=False):
 
     def inspect(names):
         try:
-            if getattr(project, "cas_index", None) is not None:
-                from bst_cas import load_artifact
-
-                contents = {}
-                for name in names:
-                    entries, identity = load_artifact(project.cas_index, project, name, graph.nodes[name]["full-key"])
-                    contents[name] = entries
-            else:
-                contents = parse_listings(*project.listings(names), names)
+            contents = parse_listings(*project.listings(names), names)
         except (OSError, ValueError) as error:
             if len(names) > 1:
                 # Isolate stale/deleted cache entries without losing good owners.
@@ -143,23 +135,36 @@ def collect(project, graph, pattern, glob=False):
             if name not in contents:
                 errors.append({"element": name, "message": "Artifact disappeared from the local cache"})
                 continue
-            inspected.add(name)
-            dependency_paths = graph.paths(name)
-            for entry in contents[name]:
-                path = entry["path"]
-                if not (fnmatch.fnmatchcase(path, pattern) if glob else path == pattern):
-                    continue
-                owner = {key: value for key, value in entry.items() if key != "path"}
-                owner.update(
-                    element=name,
-                    artifact_key=graph.nodes[name]["full-key"],
-                    state=graph.nodes[name]["state"],
-                    dependency_paths=dependency_paths,
-                )
-                index.setdefault(path, []).append(owner)
+            record(name, contents[name])
 
-    for batch in batches(candidates):
-        inspect(batch)
+    def record(name, entries):
+        inspected.add(name)
+        dependency_paths = graph.paths(name)
+        for entry in entries:
+            path = entry["path"]
+            if not (fnmatch.fnmatchcase(path, pattern) if glob else path == pattern):
+                continue
+            owner = {key: value for key, value in entry.items() if key != "path"}
+            owner.update(
+                element=name,
+                artifact_key=graph.nodes[name]["full-key"],
+                state=graph.nodes[name]["state"],
+                dependency_paths=dependency_paths,
+            )
+            index.setdefault(path, []).append(owner)
+
+    if getattr(project, "cas_index", None) is not None:
+        from bst_cas import load_artifacts
+
+        keys = {name: graph.nodes[name]["full-key"] for name in candidates}
+        for name, entries, identity, error in load_artifacts(project.cas_index, project, candidates, keys):
+            if error:
+                errors.append({"element": name, "message": error})
+            else:
+                record(name, entries)
+    else:
+        for batch in batches(candidates):
+            inspect(batch)
     return index, {
         "selected": len(graph.selected),
         "inspected": len(inspected),

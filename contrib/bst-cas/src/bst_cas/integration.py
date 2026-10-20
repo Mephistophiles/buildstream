@@ -62,9 +62,9 @@ def elf_entries(index, entries, owner, read_elf, namespace, max_elf_size):
 
 
 @contextmanager
-def artifact_files(index, project, name):
+def artifact_files(index, project, name, *, loaded=None):
     """Private copies for ripgrep; omit target links, never link CAS into a tree."""
-    entries, identity = load_artifact(index, project, name)
+    entries, identity = loaded if loaded is not None else load_artifact(index, project, name)
     with tempfile.TemporaryDirectory(prefix="bst-cas-search-") as temporary:
         root = Path(temporary)
         for entry in entries:

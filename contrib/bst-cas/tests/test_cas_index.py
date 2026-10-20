@@ -42,7 +42,7 @@ def test_warm_cache_reuses_tree_and_analysis_but_not_owners(cas, database, monke
 
         class Project:
             def report(self, names, fields):
-                return [{"full-key": names[0], "artifact-cas-digest": root}]
+                return [{"name": name, "full-key": name, "artifact-cas-digest": root} for name in names]
 
         for owner in ("a.bst", "junction.bst:b.bst"):
             rows, identity = load_artifact(index, Project(), owner, owner)
@@ -125,9 +125,9 @@ def test_rejects_identity_changes_and_corrupt_database(cas, database):
     class Project:
         calls = 0
 
-        def report(self, *_):
+        def report(self, names, *_):
             self.calls += 1
-            return [{"full-key": str(self.calls), "artifact-cas-digest": root}]
+            return [{"name": name, "full-key": str(self.calls), "artifact-cas-digest": root} for name in names]
 
     with Index(cas.directory, database) as index:
         with pytest.raises(ValueError, match="Project key changed"):

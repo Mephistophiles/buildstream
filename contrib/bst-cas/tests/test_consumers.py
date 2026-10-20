@@ -88,7 +88,8 @@ def test_blame_and_grep_share_tree_without_listing_or_checkout(cas, database, pr
     assert rows[0]["content_comparison"] == "identical"
     assert {o["element"] for o in rows[0]["owners"]} == {"one.bst", "two.bst"}
     assert rows[-1]["coverage"]["cas_index"]["trees"] == 1
-    assert rows[-1]["coverage"]["cas_index"]["hits"] == 1
+    assert rows[-1]["coverage"]["cas_index"]["identity_queries"] == 2
+    assert rows[-1]["coverage"]["cas_index"]["shared_tree_reuses"] == 1
     # Ripgrep uses real execution; only bst availability was stubbed above.
     if shutil.which("rg") is None:
         pytest.skip("Install ripgrep")
@@ -99,7 +100,7 @@ def test_blame_and_grep_share_tree_without_listing_or_checkout(cas, database, pr
     assert [r["element"] for r in matches] == ["one.bst", "two.bst"]
     assert all(r["path"] == "data.txt" and r["line"] == 2 for r in matches)
     assert all(r["origin"].startswith("cas:") for r in matches)
-    assert rows[-1]["cas_index"]["hits"] == 2
+    assert rows[-1]["cas_index"]["shared_tree_reuses"] == 1
     assert rows[-1]["skipped"] == ["product.bst"]
     # An indexed tree cannot hide missing bodies, even in ownership-only mode.
     cas.path(project.roots["one.bst"]).unlink()
@@ -151,8 +152,16 @@ def test_size_uses_digests_and_shared_tree_once(cas, database, project, monkeypa
 
         def __call__(self, argv):
             assert "show" in argv and "checkout" not in argv
-            name = argv[-1]
-            return subprocess.CompletedProcess(argv, 0, "key-" + name + "\n" + project.roots[name] + "\n")
+            names = argv[argv.index("--") + 1 :]
+            template = argv[argv.index("--format") + 1]
+            records = project().report(names, ("name", "full-key", "artifact-cas-digest"))
+            output = ""
+            for record in records:
+                row = template
+                for field, value in record.items():
+                    row = row.replace("%{" + field + "}", value)
+                output += row
+            return subprocess.CompletedProcess(argv, 0, output)
 
         def cancel(self):
             pass
@@ -174,7 +183,7 @@ def test_size_uses_digests_and_shared_tree_once(cas, database, project, monkeypa
     assert report["total"]["file_bytes"] == 40
     assert report["total"]["content_unique_bytes"] == 20
     assert report["coverage"]["cas_index"]["trees"] == 1
-    assert report["coverage"]["cas_index"]["hits"] == 1
+    assert report["coverage"]["cas_index"]["shared_tree_reuses"] == 1
 
 
 def test_wire_projection_matches_buildstream_proto(cas, database):
