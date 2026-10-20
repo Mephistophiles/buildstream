@@ -11,72 +11,37 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-"""Read archives without extracting files or following host filesystem links."""
+"""ELF-specific projection of the shared safe archive inventory."""
 
-import hashlib
-from pathlib import PurePosixPath
-import tarfile
-
+import threading
+from bst_tools_core.archive import Archive
+from bst_tools_core.paths import normalize_path as path_name
 from .elf import read_elf
 
 
-def path_name(value):
-    if not value or "\x00" in value or "\n" in value or "\r" in value:
-        raise ValueError("Empty path or unsupported path characters")
-    path = PurePosixPath(value)
-    if ".." in path.parts:
-        raise ValueError("Archive paths must not contain '..'")
-    return "/" + str(path).lstrip("/") if str(path) != "." else "/"
-
-
 def scan(path, owner, *, max_elf_size=512 * 1024 * 1024):
-    entries, errors = {}, []
-    with tarfile.open(path, "r:*") as archive:
-        for member in archive:
-            if member.name.startswith("/"):
-                raise ValueError("Absolute archive member path")
-            name = path_name(member.name)
-            if name == "/" and member.isdir():
-                continue
-            if name in entries:
-                raise ValueError("Duplicate archive path: " + name)
-            kind = (
-                "file"
-                if member.isfile()
-                else (
-                    "directory"
-                    if member.isdir()
-                    else "symlink" if member.issym() else "hardlink" if member.islnk() else "special"
-                )
-            )
-            entry = {
-                "id": owner + "::" + name,
-                "owner": owner,
-                "path": name,
-                "kind": kind,
-                "size": member.size,
-                "mode": member.mode & 0o7777,
-            }
-            if kind in ("symlink", "hardlink"):
-                entry["target"] = member.linkname
-            if kind == "file":
-                with archive.extractfile(member) as stream:
-                    if stream.read(4) == b"\x7fELF":
-                        try:
-                            if member.size > max_elf_size:
-                                raise ValueError("ELF exceeds --max-elf-size")
-                            digest = hashlib.sha256()
-                            stream.seek(0)
-                            while chunk := stream.read(1024 * 1024):
-                                digest.update(chunk)
-                            entry["sha256"] = digest.hexdigest()
-                            entry["elf"] = read_elf(stream)
-                        except ValueError as error:
-                            errors.append({"owner": owner, "path": name, "message": str(error)})
-            entries[name] = entry
-    for name in entries:
-        for parent in PurePosixPath(name).parents:
-            ancestor = entries.get(str(parent))
-            if ancestor and ancestor["kind"] != "directory":
-                raise ValueError("Non-directory archive ancestor: " + str(parent))
-    return list(entries.values()), errors
+    archive = Archive(path, threading.Event()).scan()
+    records, errors = [], []
+    for name, source in archive.entries.items():
+        path_name(name)
+        kind = source["type"]
+        entry = {
+            "id": owner + "::/" + name,
+            "owner": owner,
+            "path": "/" + name,
+            "kind": kind,
+            "size": source.get("size", 0),
+            "mode": source["mode"],
+        }
+        if kind in ("symlink", "hardlink"):
+            entry["target"] = source["target"]
+        if kind == "file" and source["elf"]:
+            try:
+                if source["size"] > max_elf_size:
+                    raise ValueError("ELF exceeds --max-elf-size")
+                with archive.stream(name) as stream:
+                    entry.update(sha256=source["sha256"], elf=read_elf(stream))
+            except ValueError as error:
+                errors.append({"owner": owner, "path": entry["path"], "message": str(error)})
+        records.append(entry)
+    return records, errors

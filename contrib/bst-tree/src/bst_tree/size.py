@@ -21,10 +21,12 @@ import tarfile
 import tempfile
 import threading
 
-from .adapter import capture, command_base
-from .artifacts import Archive, FILE_KINDS
-from .artifact_cli import positive_int
-from .headless import HeadlessRunner, project_arguments
+from .adapter import capture
+from bst_tools_core.project import command_base
+from bst_tools_core.archive import Archive, FILE_KINDS
+from bst_tools_core.cli import positive_int
+from bst_tools_core.process import CliRunner
+from .headless import project_arguments
 from .model import Graph, read_snapshot
 
 
@@ -172,7 +174,7 @@ def _run_size(args, cas):
     archives = dict(args.archive)
     if len(archives) != len(args.archive):
         raise ValueError("Duplicate archive element")
-    runner = HeadlessRunner(args.timeout, args.output_limit)
+    runner = CliRunner(args.timeout, args.output_limit)
     cancelled = threading.Event()
     try:
         if args.snapshot:

@@ -6,7 +6,7 @@ readelf or a host dynamic loader. pyelftools reads ELF data without executing an
 target program. BuildStream 2.8+ and project plugins are required for live inputs.
 
 ```sh
-pipx install ./contrib/bst-elf
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-elf
 bst-elf product.bst --path /usr/bin/app
 bst-elf -C /project --option arch aarch64 product.bst --json --check
 bst-elf product.bst --expect-machine EM_AARCH64 --path /usr/bin/app
@@ -106,7 +106,7 @@ to 10000 and reports incomplete analysis if exceeded. Archive disk usage and
 non-ELF file counts are not capped. By default, large artifacts require tar export. Optional direct CAS mode
 reuses the shared persistent inventory and per-file ELF analysis cache.
 
-Development: `pip install './contrib/bst-elf[test]'`, then
+Development: `pip install ./contrib/bst-tools-core './contrib/bst-elf[test]'`, then
 `pytest -c contrib/bst-elf/pyproject.toml contrib/bst-elf/tests`.
 The tests compile small real ELF files using `cc`, but never execute them.
 Set `BST_ELF_TEST_LIVE=1` with BuildStream/buildbox installed for real cached-artifact
@@ -119,7 +119,7 @@ Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
 environment and point it at the actual local BuildStream CAS:
 
 ```sh
-python -m pip install ./contrib/bst-cas ./contrib/bst-elf
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-elf
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
 bst-elf product.bst --path /usr/bin/app --json
 ```
@@ -135,3 +135,7 @@ Static ELF metadata is cached per file digest and parser version; dependency
 resolution still runs against the current selected graph and loader profile.
 `coverage.cas_index` includes reuse statistics. Offline `--archive` inputs
 continue to scan the specified tar archives.
+
+Shared public CLI framing, process ownership and path validation live in
+[bst-tools-core](../bst-tools-core/README.md); application packages do not import
+each other.

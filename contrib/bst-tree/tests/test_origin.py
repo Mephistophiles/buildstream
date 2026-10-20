@@ -78,10 +78,10 @@ def test_report_validation_and_missing_reference():
 
 
 def test_backend_requires_fork_and_does_not_guess(monkeypatch, capsys):
-    from bst_tree.artifact_process import Execution
+    from bst_tools_core.process import Execution
 
     monkeypatch.setattr(
-        "bst_tree.headless.CommandRunner.__call__",
+        "bst_tools_core.process.CommandRunner.__call__",
         lambda *args, **kwargs: Execution(2, "", "No such option: --provenance"),
     )
     assert main(["origin", "app.bst", "--path", "/env/CFLAGS", "--format", "json"]) == 2

@@ -18,7 +18,7 @@ import json
 import os
 from pathlib import PurePosixPath
 
-from .process import child, diagnostic_text
+from bst_tools_core.process import child, diagnostic_text
 
 
 def rg_arguments(args):

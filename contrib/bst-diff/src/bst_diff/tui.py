@@ -22,13 +22,13 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
-from .artifact_process import Cancelled
-from .artifacts import FILE_KINDS
-from .diff_tui import diff_text
+from bst_tools_core.process import Cancelled
+from bst_tools_core.archive import FILE_KINDS
+from bst_tools_core.ui import diff_text
 
 
 class ArtifactDiffApp(App):
-    TITLE = "bst-tree · artifacts"
+    TITLE = "bst-diff"
     AUTO_FOCUS = "#artifact-files"
     CSS = """
     #artifact-summary { height: auto; padding: 0 1; color: $text-muted; }

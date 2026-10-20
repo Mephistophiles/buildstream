@@ -10,7 +10,7 @@ this package in their existing modes.
 From the repository root, install the packages in the **same environment**:
 
 ```sh
-python -m pip install ./contrib/bst-cas ./contrib/bst-blame ./contrib/bst-elf ./contrib/bst-grep ./contrib/bst-tree
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-blame ./contrib/bst-elf ./contrib/bst-grep ./contrib/bst-tree
 
 # Use the actual local BuildStream cachedir + /cas. This example is the default.
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
@@ -130,7 +130,7 @@ their own no-match, findings and budget exit statuses.
 ## Tests
 
 ```sh
-python -m pip install './contrib/bst-cas[test]' ./contrib/bst-elf ./contrib/bst-blame ./contrib/bst-grep './contrib/bst-tree[test]'
+python -m pip install ./contrib/bst-tools-core './contrib/bst-cas[test]' ./contrib/bst-elf ./contrib/bst-blame ./contrib/bst-grep './contrib/bst-tree[test,tui]'
 python -m pytest -c contrib/bst-cas/pyproject.toml contrib/bst-cas/tests
 # Also needs bst/buildbox, gcc and ripgrep:
 BST_CAS_TEST_LIVE=1 python -m pytest -c contrib/bst-cas/pyproject.toml contrib/bst-cas/tests

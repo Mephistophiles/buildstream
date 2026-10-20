@@ -18,7 +18,7 @@ import hashlib
 import tarfile
 
 from .index import normalize_path
-from .process import child, diagnostic_text
+from bst_tools_core.process import child, diagnostic_text
 
 TEXT_LIMIT = 64 * 1024
 DIFF_LIMIT = 200

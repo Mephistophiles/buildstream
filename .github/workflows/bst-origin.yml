@@ -1,9 +1,9 @@
 name: bst-origin
 on:
   push:
-    paths: ['contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
   pull_request:
-    paths: ['contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '${{ matrix.python }}'
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
-      - run: python -m pip install './contrib/bst-tree[test]' 'BuildStream==2.8.0'
+      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0'
       - name: Test fork Python changes against the released compiled runtime
         run: |
           python - <<'PY'

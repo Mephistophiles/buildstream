@@ -23,7 +23,7 @@ import sys
 from . import __version__
 from .content import compare, describe
 from .index import collect, normalize_path
-from .project import Project
+from bst_tools_core.project import Project
 
 
 def parser():

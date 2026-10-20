@@ -16,14 +16,14 @@
 import argparse
 import json
 import os
-import subprocess
 import sys
-import threading
 
 from .adapter import capture
 from .diff import DIFF_FIELDS, compare, has_changes, render_tree
 from .model import read_snapshot, write_snapshot
 from .inspection import ProjectInspector
+from bst_tools_core.process import CliRunner
+from bst_tools_core.cli import require_tui
 
 
 def parser():
@@ -36,50 +36,94 @@ def parser():
     for command in ("browse", "snapshot"):
         description = (
             "Browse a live project or a saved snapshot in a terminal."
-            if command == "browse" else "Save the full dependency graph as a portable JSON snapshot."
+            if command == "browse"
+            else "Save the full dependency graph as a portable JSON snapshot."
         )
         sub = commands.add_parser(
-            command, help=description, description=description,
+            command,
+            help=description,
+            description=description,
             epilog=(
                 "Examples: bst-tree browse -C /path/to/project app.bst; "
                 "bst-tree browse --snapshot graph.json. Snapshot mode has no live element inspection."
-                if command == "browse" else
-                "Example: bst-tree snapshot -C /path/to/project app.bst -o graph.json. "
+                if command == "browse"
+                else "Example: bst-tree snapshot -C /path/to/project app.bst -o graph.json. "
                 "Existing output files are replaced atomically."
             ),
         )
-        sub.add_argument("targets", nargs="*" if command == "browse" else "+", metavar="TARGET",
-                         help="Explicit element names, including junction-qualified names; required for live projects")
+        sub.add_argument(
+            "targets",
+            nargs="*" if command == "browse" else "+",
+            metavar="TARGET",
+            help="Explicit element names, including junction-qualified names; required for live projects",
+        )
         sub.add_argument("-C", "--directory", help="Project directory (default: current directory)")
-        sub.add_argument("--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"),
-                         help="Set a BuildStream project option; may be repeated (queries use strict mode)")
+        sub.add_argument(
+            "--option",
+            nargs=2,
+            action="append",
+            default=[],
+            metavar=("NAME", "VALUE"),
+            help="Set a BuildStream project option; may be repeated (queries use strict mode)",
+        )
         if command == "browse":
-            sub.add_argument("--snapshot", metavar="FILE",
-                             help="Browse saved JSON without bst; cannot be combined with project arguments")
+            sub.add_argument(
+                "--snapshot",
+                metavar="FILE",
+                help="Browse saved JSON without bst; cannot be combined with project arguments",
+            )
         else:
-            sub.add_argument("-o", "--output", required=True, metavar="FILE",
-                             help="Output JSON snapshot; - writes stdout, otherwise replaces an existing file")
-            sub.add_argument("--details", action="store_true",
-                             help="Capture resolved config, variables, environment and public data for change analysis")
+            sub.add_argument(
+                "-o",
+                "--output",
+                required=True,
+                metavar="FILE",
+                help="Output JSON snapshot; - writes stdout, otherwise replaces an existing file",
+            )
+            sub.add_argument(
+                "--details",
+                action="store_true",
+                help="Capture resolved config, variables, environment and public data for change analysis",
+            )
     diff = commands.add_parser(
-        "diff", help="Compare two snapshots without loading a project",
+        "diff",
+        help="Compare two snapshots without loading a project",
         description="Compare saved graphs; no BuildStream installation or terminal is required.",
         epilog="Example: bst-tree diff before.json after.json --structure-only --check. "
-               "Exit status: 0 success, 1 differences with --check, 2 error.",
+        "Exit status: 0 success, 1 differences with --check, 2 error.",
     )
     diff.add_argument("old", help="Baseline JSON snapshot")
     diff.add_argument("new", help="Updated JSON snapshot")
-    diff.add_argument("--format", choices=("tree", "json", "tui"), default="tree",
-                      help="Output format (default: tree); tui opens an interactive change inspector")
-    diff.add_argument("--tui", dest="format", action="store_const", const="tui",
-                      help="Open the interactive change inspector (alias for --format tui)")
+    diff.add_argument(
+        "--format",
+        choices=("tree", "json", "tui"),
+        default="tree",
+        help="Output format (default: tree); tui opens an interactive change inspector",
+    )
+    diff.add_argument(
+        "--tui",
+        dest="format",
+        action="store_const",
+        const="tui",
+        help="Open the interactive change inspector (alias for --format tui)",
+    )
     diff.add_argument("--explain", action="store_true", help="Include observed inputs and dependency candidates")
-    diff.add_argument("--semantic", action="store_true",
-                      help="Compare per-target reachable dependencies and their build/runtime roles")
-    diff.add_argument("--scope", choices=("all", "run", "build"),
-                      help="Semantic roles to compare (default: all means build and runtime)")
-    diff.add_argument("--target", action="append", metavar="TARGET",
-                      help="Limit semantic comparison to a target requested in both snapshots; repeatable")
+    diff.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Compare per-target reachable dependencies and their build/runtime roles",
+    )
+    diff.add_argument(
+        "--scope",
+        choices=("all", "run", "build"),
+        help="Semantic roles to compare (default: all means build and runtime)",
+    )
+    diff.add_argument(
+        "--target",
+        action="append",
+        metavar="TARGET",
+        help="Limit semantic comparison to a target requested in both snapshots; repeatable",
+    )
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
     diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
     diff.add_argument(
@@ -107,49 +151,16 @@ def parser():
         help="Only compare nodes, dependencies, dependency types and targets",
     )
     diff.add_argument("--check", action="store_true", help="Exit 1 when the selected comparison has changes")
-    from .artifact_cli import configure_parser
-    configure_parser(commands)
     from .headless import configure_parser as configure_headless
+
     result.headless_parsers = configure_headless(commands)
     from .size import configure_parser as configure_size
+
     result.headless_parsers["size"] = configure_size(commands)
     from .origin import configure_parser as configure_origin
+
     result.headless_parsers["origin"] = configure_origin(commands)
     return result
-
-
-class CancellableRunner:
-    """Own subprocess lifetime so leaving the TUI cancels an active bst call."""
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.process = None
-        self.cancelled = False
-        self.diagnostics = []
-
-    def __call__(self, args, **kwargs):
-        kwargs.pop("check", None)
-        # Capture stderr in TUI mode so diagnostics don't corrupt the display.
-        with self.lock:
-            if self.cancelled:
-                raise ValueError("Loading cancelled")
-            process = self.process = subprocess.Popen(args, stderr=subprocess.PIPE, **kwargs)
-        stdout, stderr = process.communicate()
-        if process.returncode:
-            raise ValueError(stderr.strip() or f"bst exited {process.returncode}")
-        if stderr.strip():
-            self.diagnostics.append(stderr.strip())
-        return subprocess.CompletedProcess(args, process.returncode, stdout)
-
-    def cancel(self):
-        with self.lock:
-            self.cancelled = True
-            if self.process is not None and self.process.poll() is None:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
 
 
 def main(argv=None):
@@ -164,19 +175,20 @@ def main(argv=None):
     try:
         if args.command == "origin":
             from .origin import run_origin
+
             return run_origin(args)
         if args.command == "size":
             from .size import run_size
+
             return run_size(args)
         if args.command in ("tree", "rdeps", "paths"):
             from .headless import run_graph_query
+
             return run_graph_query(args)
         if args.command == "inspect":
             from .headless_inspection import run_inspection
+
             return run_inspection(args)
-        if args.command == "artifact-diff":
-            from .artifact_cli import run_artifact_diff
-            return run_artifact_diff(args)
         if args.command == "diff":
             old, new = read_snapshot(args.old), read_snapshot(args.new)
             fields = set(DIFF_FIELDS)
@@ -193,40 +205,56 @@ def main(argv=None):
                 raise ValueError("--reverse applies to structural tree output; omit it for semantic comparison")
             semantic_model = semantic_report = None
             changed = has_changes(delta)
-            color = args.color == "always" or (args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ)
+            color = args.color == "always" or (
+                args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
+            )
             if args.semantic:
                 from .semantic import SemanticDiff, has_semantic_changes, render_semantic
 
                 semantic_model = SemanticDiff(old, new, args.target)
-                semantic_report = semantic_model.report(args.scope or "all", show_all=args.all,
-                                                       limit=None if args.format == "json" else 10)
+                semantic_report = semantic_model.report(
+                    args.scope or "all", show_all=args.all, limit=None if args.format == "json" else 10
+                )
                 changed = has_semantic_changes(semantic_report)
             if args.format == "tui":
                 if not sys.stdin.isatty() or not sys.stdout.isatty():
                     raise ValueError("interactive diff requires a terminal (TTY); use --explain for text or JSON")
                 if args.reverse:
                     raise ValueError("--reverse applies to tree output; omit it for interactive diff")
+                require_tui("bst-tree")
                 from .diff_tui import DiffExplorer
-                DiffExplorer(old, new, fields=fields, show_all=args.all,
-                             labels=(os.path.basename(args.old), os.path.basename(args.new)),
-                             semantic=args.semantic, semantic_scope=args.scope or "all",
-                             semantic_model=semantic_model).run()
+
+                DiffExplorer(
+                    old,
+                    new,
+                    fields=fields,
+                    show_all=args.all,
+                    labels=(os.path.basename(args.old), os.path.basename(args.new)),
+                    semantic=args.semantic,
+                    semantic_scope=args.scope or "all",
+                    semantic_model=semantic_model,
+                ).run()
                 return 1 if args.check and changed else 0
             if semantic_report is not None:
                 explanation = None
                 if args.explain:
                     from .explain import analyze, render_explanation
+
                     explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
                     if args.format == "json":
                         semantic_report["explanation"] = explanation
-                print(json.dumps(semantic_report, ensure_ascii=False, indent=2, sort_keys=True)
-                      if args.format == "json" else render_semantic(semantic_report, color=color))
+                print(
+                    json.dumps(semantic_report, ensure_ascii=False, indent=2, sort_keys=True)
+                    if args.format == "json"
+                    else render_semantic(semantic_report, color=color)
+                )
                 if explanation is not None and args.format != "json":
                     print("\n" + render_explanation(explanation))
                 return 1 if args.check and changed else 0
             explanation = None
             if args.explain:
                 from .explain import analyze, render_explanation
+
                 explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
                 if args.format == "json":
                     delta["explanation"] = explanation
@@ -259,13 +287,16 @@ def main(argv=None):
             arguments.error("browse requires targets or --snapshot")
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise ValueError("browse requires a terminal (TTY); use snapshot or diff for noninteractive use")
+        require_tui("bst-tree")
         from .tui import Explorer
 
-        runner = CancellableRunner()
+        runner = CliRunner(quiet=True)
 
         def inspector_factory():
-            inspection_runner = CancellableRunner()
-            return ProjectInspector(args.directory, args.option, run=inspection_runner, cancel=inspection_runner.cancel)
+            inspection_runner = CliRunner(quiet=True)
+            return ProjectInspector(
+                args.directory, args.option, run=inspection_runner, cancel=inspection_runner.cancel
+            )
 
         try:
             if args.snapshot:

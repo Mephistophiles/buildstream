@@ -14,20 +14,11 @@
 """Build a query-specific ownership index from local artifact listings."""
 
 import fnmatch
-from pathlib import PurePosixPath
+from bst_tools_core.paths import normalize_path
 import re
 
 EMPTY = "This element has no associated artifacts"
 STATS = re.compile(r"^([dl-][rwx-]{9}) +(dir|link|exe|reg) +([0-9]+)(.*)$")
-
-
-def normalize_path(value):
-    if not value or "\x00" in value or "\n" in value or "\r" in value:
-        raise ValueError("Artifact paths must be nonempty and contain no NUL or line breaks")
-    path = PurePosixPath(value)
-    if ".." in path.parts:
-        raise ValueError("Artifact paths must not contain '..'")
-    return "/" + str(PurePosixPath("/", str(path).lstrip("/"))).lstrip("/")
 
 
 def sections(output, aliases):

@@ -23,7 +23,7 @@ import pytest
 from bst_elf.archive import scan
 from bst_elf.cli import main
 from bst_elf.elf import read_elf
-from bst_elf.process import CommandRunner
+from bst_tools_core.process import CommandRunner
 
 
 def build_archives(tmp_path):
@@ -92,26 +92,6 @@ def test_malformed_archive_and_elf_coverage(tmp_path, capsys):
     with pytest.raises(ValueError):
         scan(archive, "bad")
 
-
-def test_export_runner_writes_binary_file_and_enforces_timeout(tmp_path):
-    import sys
-
-    runner = CommandRunner()
-    try:
-        path = tmp_path / "data"
-        with path.open("wb") as output:
-            result = runner(
-                [
-                    sys.executable,
-                    "-c",
-                    "import sys;sys.stdout.buffer.write(b'\\x00ELF');sys.stderr.write('diagnostic')",
-                ],
-                stdout_file=output,
-            )
-        assert result.returncode == 0 and path.read_bytes() == b"\x00ELF" and result.stderr == "diagnostic"
-        assert runner([sys.executable, "-c", "import time;time.sleep(10)"], timeout=0.05).timed_out
-    finally:
-        runner.cancel()
 
 
 def test_invalid_inputs_are_json_errors(tmp_path, capsys):

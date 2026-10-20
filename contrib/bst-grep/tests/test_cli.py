@@ -22,7 +22,7 @@ import sys
 import pytest
 
 from bst_grep import cli
-from bst_grep.project import Paths
+from bst_tools_core.project import Paths
 
 
 @pytest.fixture

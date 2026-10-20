@@ -181,8 +181,7 @@ def test_live_semantic_reachability(tmp_path, monkeypatch):
 @pytest.mark.skipif(
     os.environ.get("BST_TREE_TEST_LIVE") != "1", reason="Set BST_TREE_TEST_LIVE=1 with bst/buildbox installed"
 )
-def test_live_artifact_comparison(tmp_path, monkeypatch, capsys):
-    from bst_tree.artifacts import ArtifactComparison
+def test_live_headless_artifact_inspection(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
@@ -212,19 +211,6 @@ def test_live_artifact_comparison(tmp_path, monkeypatch, capsys):
         (source / "link").symlink_to("missing")
         (source / "added").write_text("new file\n")
         inspector.execute(["build", "--", "import.bst"])
-        session = ArtifactComparison(old_ref, "import.bst", directory=project)
-        try:
-            session.load()
-            records = {r["path"]: r for r in session.records}
-            assert records["config"]["fields"] == ["mode", "content"]
-            assert records["link"]["fields"] == ["target"]
-            assert records["added"]["change"] == "added"
-            assert "-old" in session.text_diff("config")
-            assert "+new" in session.text_diff("config")
-        finally:
-            session.close()
-        assert not session.root.exists()
-
         # Exercise the installed public CLI contract through every headless query.
         from bst_tree.cli import main
         import json

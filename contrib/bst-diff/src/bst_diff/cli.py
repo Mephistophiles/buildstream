@@ -15,32 +15,17 @@
 
 import argparse
 import json
-import math
 import os
 import sys
+from bst_tools_core.cli import positive_float, positive_int, require_tui
 
 
-def positive_float(value):
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise argparse.ArgumentTypeError("must be a finite positive number")
-    return number
-
-
-def positive_int(value):
-    number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("must be a positive number of bytes")
-    return number
-
-
-def configure_parser(commands):
-    sub = commands.add_parser(
-        "artifact-diff",
-        help="Compare files in two artifacts; optional abidiff and diffoscope",
+def parser():
+    sub = argparse.ArgumentParser(
+        prog="bst-diff",
         description="Compare artifact refs or two saved checkout tar archives, without builds or integration.",
-        epilog="Examples: bst-tree artifact-diff PROJECT/ELEMENT/OLD_KEY app.bst -C /project --tui; "
-        "bst-tree artifact-diff before.tar after.tar --archives --abidiff --diffoscope --check.",
+        epilog="Examples: bst-diff PROJECT/ELEMENT/OLD_KEY app.bst -C /project --tui; "
+        "bst-diff before.tar after.tar --archives --abidiff --diffoscope --check.",
     )
     sub.add_argument("old", help="Old artifact ref / element name (or tar archive with --archives)")
     sub.add_argument("new", help="New artifact ref / element name (or tar archive with --archives)")
@@ -128,8 +113,10 @@ def configure_parser(commands):
         help="Exit 1 for selected file or analyzer differences; requested analyzer errors exit 2",
     )
 
+    return sub
 
-def run_artifact_diff(args):
+
+def run(args):
     from .artifacts import (
         ArtifactComparison,
         archive_name,
@@ -192,12 +179,13 @@ def run_artifact_diff(args):
 
     try:
         if args.format == "tui":
-            from .artifact_tui import ArtifactDiffApp
+            require_tui("bst-diff")
+            from .tui import ArtifactDiffApp
 
             app = ArtifactDiffApp(session, loader=load)
             code = app.run() or 0
             if getattr(app, "load_error", None):
-                print("bst-tree: " + app.load_error, file=sys.stderr)
+                print("bst-diff: " + app.load_error, file=sys.stderr)
             if code:
                 return code
         else:
@@ -228,3 +216,21 @@ def run_artifact_diff(args):
         return 1 if args.check and has_artifact_changes(report) else 0
     finally:
         session.close()
+
+
+def main(argv=None):
+    args = parser().parse_intermixed_args(argv)
+    try:
+        return run(args)
+    except BrokenPipeError:
+        sys.stdout = open(os.devnull, "w")
+        return 0
+    except (OSError, ValueError) as error:
+        print(f"bst-diff: {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

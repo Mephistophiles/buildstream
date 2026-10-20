@@ -19,8 +19,8 @@ import threading
 
 import pytest
 
-from bst_tree.artifact_process import Cancelled, Execution
-from bst_tree.artifacts import Archive, ArtifactComparison, has_analysis_errors, has_artifact_changes, render_artifacts
+from bst_tools_core.process import Cancelled, Execution
+from bst_diff.artifacts import Archive, ArtifactComparison, has_analysis_errors, has_artifact_changes, render_artifacts
 
 
 def archive(path, entries):
@@ -180,7 +180,7 @@ def test_partial_tail_and_final_newline_are_explicit(tmp_path):
 def test_abidiff_exit_bits_are_not_generic_command_failures(tmp_path, monkeypatch, code, status):
     old, new = pair(tmp_path)
     runner = FakeRunner(code)
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
     session = ArtifactComparison(
         str(old),
         str(new),
@@ -210,7 +210,7 @@ def test_abidiff_exit_bits_are_not_generic_command_failures(tmp_path, monkeypatc
 def test_diffoscope_status_and_atomic_html(tmp_path, monkeypatch, code, status):
     old, new = pair(tmp_path)
     runner = FakeRunner(code)
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
     output = tmp_path / "report.html"
     output.write_text("existing")
     session = ArtifactComparison(str(old), str(new), archives=True, runner=runner)
@@ -226,7 +226,7 @@ def test_diffoscope_status_and_atomic_html(tmp_path, monkeypatch, code, status):
 
 def test_missing_tools_timeout_retry_and_path_filter(tmp_path, monkeypatch):
     old, new = pair(tmp_path)
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: None)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: None)
     runner = FakeRunner(0, timed_out=True)
     session = ArtifactComparison(str(old), str(new), archives=True, paths=["lib/libx.so"], runner=runner)
     try:
@@ -234,7 +234,7 @@ def test_missing_tools_timeout_retry_and_path_filter(tmp_path, monkeypatch):
         assert len(session.records) == 1
         assert session.analyze("abidiff", "lib/libx.so")["status"] == "unavailable"
         assert not runner.calls
-        monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+        monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
         assert session.analyze("abidiff", "lib/libx.so")["status"] == "timeout"
         runner.result = Execution(0, "")
         assert session.analyze("abidiff", "lib/libx.so")["status"] == "no_reported_change"
@@ -280,3 +280,23 @@ def test_cancel_before_loading_releases_temporaries(tmp_path):
     with pytest.raises(Cancelled):
         session.load()
     assert not session.root.exists()
+
+
+@pytest.mark.parametrize("code,status", [(0, "analyzed"), (1, "error"), (-9, "error")])
+def test_bloaty_diff_direction_and_status(tmp_path, monkeypatch, code, status):
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+    runner = FakeRunner(code=code)
+    session = ArtifactComparison(
+        *(str(p) for p in pair(tmp_path)), archives=True, runner=runner, bloaty_sources="sections,compileunits"
+    )
+    try:
+        session.load()
+        result = session.analyze("bloaty", "lib/libx.so")
+        assert result["status"] == status
+        argv = runner.calls[0][0]
+        assert argv[argv.index("-d") + 1] == "sections,compileunits"
+        assert "/after/" in argv[-3] and argv[-2] == "--" and "/before/" in argv[-1]
+        with pytest.raises(ValueError):
+            session.analyze("bloaty", "etc/config")
+    finally:
+        session.close()

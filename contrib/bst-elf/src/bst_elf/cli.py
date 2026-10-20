@@ -16,7 +16,6 @@
 import argparse
 import json
 import os
-import math
 from pathlib import Path
 import sys
 import tarfile
@@ -24,23 +23,10 @@ import tempfile
 
 from .archive import path_name, scan
 from .elf import read_elf
-from .process import CommandRunner
-from .project import Project
+from bst_tools_core.cli import positive_int as positive, positive_float as seconds
+from bst_tools_core.process import CommandRunner
+from bst_tools_core.project import Project
 from .resolve import Resolver, load_profile
-
-
-def positive(value):
-    number = int(value)
-    if number <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return number
-
-
-def seconds(value):
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise argparse.ArgumentTypeError("must be finite and positive")
-    return number
 
 
 def parser():

@@ -9,7 +9,7 @@ description = "Inspect ELF dependencies and their BuildStream artifact owners wi
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["ruamel.yaml>=0.16.7", "pyelftools>=0.32,<1"]
+dependencies = ["bst-tools-core>=0.1,<0.2", "pyelftools>=0.32,<1"]
 
 [project.optional-dependencies]
 cas = ["bst-cas>=0.1,<0.2"]

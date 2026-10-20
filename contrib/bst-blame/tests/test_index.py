@@ -14,7 +14,7 @@
 import pytest
 
 from bst_blame.index import batches, collect, normalize_path, parse_listings
-from bst_blame.project import Graph
+from bst_tools_core.project import Graph
 from helpers import listing, node
 
 

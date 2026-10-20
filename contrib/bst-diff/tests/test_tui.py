@@ -20,9 +20,9 @@ import threading
 import pytest
 from textual.widgets import DataTable, Input, RichLog, Select, Tabs
 
-from bst_tree.artifacts import ArtifactComparison
-from bst_tree.artifact_process import Cancelled, Execution
-from bst_tree.artifact_tui import ArtifactDiffApp
+from bst_diff.artifacts import ArtifactComparison
+from bst_tools_core.process import Cancelled, Execution
+from bst_diff.tui import ArtifactDiffApp
 
 
 def pair(tmp_path):
@@ -56,7 +56,7 @@ class Runner:
 
 @pytest.mark.parametrize("size", [(150, 40), (80, 30)])
 async def test_artifact_tui_analysis_navigation_search_and_cleanup(tmp_path, monkeypatch, size):
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
     runner = Runner()
     session = ArtifactComparison(*pair(tmp_path), archives=True, runner=runner)
     app = ArtifactDiffApp(session)
@@ -101,7 +101,7 @@ async def test_artifact_tui_analysis_navigation_search_and_cleanup(tmp_path, mon
 
 async def test_artifact_tui_missing_analyzer_is_retryable(tmp_path, monkeypatch):
     session = ArtifactComparison(*pair(tmp_path), archives=True, runner=Runner())
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: None)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: None)
     app = ArtifactDiffApp(session)
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
@@ -110,7 +110,7 @@ async def test_artifact_tui_missing_analyzer_is_retryable(tmp_path, monkeypatch)
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert session.analyses["diffoscope", "etc/config"]["status"] == "unavailable"
-        monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+        monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
         await pilot.press("d")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -146,7 +146,7 @@ async def test_late_analyzer_result_does_not_overwrite_new_selection(tmp_path, m
             release.wait(3)
             return Execution(1, "file detail")
 
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
     session = ArtifactComparison(*pair(tmp_path), archives=True, runner=BlockingRunner())
     app = ArtifactDiffApp(session)
     async with app.run_test() as pilot:

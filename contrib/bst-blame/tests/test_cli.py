@@ -18,7 +18,7 @@ import sys
 import pytest
 
 from bst_blame import cli
-from bst_blame.project import Graph
+from bst_tools_core.project import Graph
 from helpers import listing, node
 
 

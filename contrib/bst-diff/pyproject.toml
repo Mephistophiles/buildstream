@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bst-diff"
+version = "0.1.0"
+description = "Compare BuildStream artifact files with abidiff, diffoscope and Bloaty"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["bst-tools-core>=0.1,<0.2"]
+
+[project.optional-dependencies]
+tui = ["textual>=8.2,<9", "bst-tools-core[tui]>=0.1,<0.2"]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+bst-diff = "bst_diff.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

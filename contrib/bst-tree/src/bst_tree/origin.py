@@ -15,8 +15,9 @@
 
 import json
 import re
-from .adapter import command_base
-from .headless import HeadlessRunner, project_arguments
+from bst_tools_core.project import command_base
+from bst_tools_core.process import CliRunner
+from .headless import project_arguments
 
 
 def configure_parser(commands):
@@ -165,7 +166,7 @@ def run_origin(args):
         raise ValueError("--from-report cannot be combined with project arguments")
     if not args.from_report and not args.element:
         raise ValueError("origin requires an element or --from-report")
-    runner = HeadlessRunner(args.timeout, args.output_limit)
+    runner = CliRunner(args.timeout, args.output_limit)
     try:
         if args.from_report:
             with open(args.from_report, encoding="utf-8") as stream:

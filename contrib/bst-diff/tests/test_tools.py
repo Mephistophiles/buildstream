@@ -18,11 +18,11 @@ import tarfile
 
 import pytest
 
-from bst_tree.artifacts import ArtifactComparison
+from bst_diff.artifacts import ArtifactComparison
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("BST_TREE_TEST_TOOLS") != "1",
-    reason="Set BST_TREE_TEST_TOOLS=1 with abidiff, diffoscope and gcc installed",
+    os.environ.get("BST_DIFF_TEST_TOOLS") != "1",
+    reason="Set BST_DIFF_TEST_TOOLS=1 with abidiff, diffoscope and gcc installed",
 )
 
 

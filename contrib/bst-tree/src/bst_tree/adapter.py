@@ -21,6 +21,8 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from .model import DETAIL_FIELDS, Graph
+from bst_tools_core.project import command_base, parse_records, report_template
+from bst_tools_core.process import CliRunner
 
 FIELDS = ("name", "kind", "full-key", "source-info", "workspaced", "build-deps", "runtime-deps")
 
@@ -36,24 +38,11 @@ def parse_report(report, marker, *, detailed=False):
 
     nodes, edges, details = {}, {}, {}
     fields = FIELDS + DETAIL_FIELDS if detailed else FIELDS
-    sections = report.split(marker + "record\n")
-    if sections[0].strip():
-        raise ValueError("Unexpected output before bst show records")
-    for section in sections[1:]:
-        values = {}
-        for index, field in enumerate(fields):
-            prefix = marker + field + "\n"
-            if not section.startswith(prefix):
-                raise ValueError(f"Malformed bst show field: {field}")
-            section = section[len(prefix) :]
-            following = marker + (fields[index + 1] if index + 1 < len(fields) else "end") + "\n"
-            value, separator, remainder = section.partition(following)
-            if not separator or marker in value:
-                raise ValueError(f"Missing bst show boundary for {field}")
-            values[field] = value if field in ("source-info", "build-deps", "runtime-deps") else value.strip()
-            section = following + remainder
-        if section != marker + "end\n" and section.strip() != marker + "end":
-            raise ValueError("Unexpected trailing bst show output")
+    for record in parse_records(report, fields, marker):
+        values = {
+            field: value if field in ("source-info", "build-deps", "runtime-deps") else value.strip()
+            for field, value in record.items()
+        }
         name = values["name"]
         if not name or name in nodes or any(v.strip() == "%{" + f + "}" for f, v in values.items()):
             raise ValueError("Duplicate node or unsupported bst show format field")
@@ -85,17 +74,9 @@ def parse_report(report, marker, *, detailed=False):
     return (*result, details) if detailed else result
 
 
-def command_base(directory=None, options=()):
-    base = ["bst", "--no-colors", "--strict"]
-    if directory:
-        base += ["-C", str(directory)]
-    for name, value in options:
-        base += ["--option", name, value]
-    return base
-
-
-def capture(targets, directory=None, options=(), run=subprocess.run, *, detailed=False):
+def capture(targets, directory=None, options=(), run=None, *, detailed=False):
     base = command_base(directory, options)
+    run = run if run is not None else CliRunner()
 
     def execute(arguments):
         result = run(base + arguments, stdout=subprocess.PIPE, text=True, check=False)
@@ -105,16 +86,18 @@ def capture(targets, directory=None, options=(), run=subprocess.run, *, detailed
 
     version = execute(["--version"]).strip()
     marker = "BST_TREE_" + uuid.uuid4().hex + "_"
-    format_string = marker + "record\n"
-    for field in FIELDS + DETAIL_FIELDS if detailed else FIELDS:
-        format_string += marker + field + "\n%{" + field + "}\n"
-    format_string += marker + "end\n"
+    format_string = report_template(FIELDS + DETAIL_FIELDS if detailed else FIELDS, marker)
     report = execute(["show", "--deps", "all", "--order", "alpha", "--format", format_string, "--", *targets])
     parsed = parse_report(report, marker, detailed=detailed)
     nodes, edges = parsed[:2]
     # Resolve links/normalized target names using the same public interface.
     roots_report = execute(["show", "--deps", "none", "--format", "%{name}", "--", *targets])
     roots = sorted(set(line.strip() for line in roots_report.splitlines() if line.strip()))
-    graph = Graph(roots, nodes, edges, {"bst_version": version, "options": dict(options), "strict": True},
-                  parsed[2] if detailed else None)
+    graph = Graph(
+        roots,
+        nodes,
+        edges,
+        {"bst_version": version, "options": dict(options), "strict": True},
+        parsed[2] if detailed else None,
+    )
     return Graph.from_dict(graph.as_dict())

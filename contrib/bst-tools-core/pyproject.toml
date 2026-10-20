@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bst-tools-core"
+version = "0.1.0"
+description = "Shared public BuildStream CLI adapters, process ownership and safe archive readers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["ruamel.yaml>=0.16.7"]
+
+[project.optional-dependencies]
+tui = ["rich>=14.2"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

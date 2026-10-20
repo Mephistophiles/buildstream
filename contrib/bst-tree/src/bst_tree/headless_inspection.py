@@ -23,8 +23,9 @@ import tarfile
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from .headless import HeadlessRunner, project_arguments
-from .artifact_cli import positive_int
+from bst_tools_core.process import CliRunner
+from .headless import project_arguments
+from bst_tools_core.cli import positive_int
 from .inspection import ProjectInspector, preview_file
 from .model import DETAIL_FIELDS, validate_details
 
@@ -240,7 +241,7 @@ def run_inspection(args):
         raise ValueError("--pull requires --section artifacts")
     if args.files and args.section != "sources":
         raise ValueError("--files requires --section sources; artifact files are listed automatically")
-    runner = HeadlessRunner(args.timeout, args.output_limit)
+    runner = CliRunner(args.timeout, args.output_limit)
     inspector = ProjectInspector(args.directory, args.option, run=runner, cancel=runner.cancel)
     try:
         report = inspect_element(args, inspector)

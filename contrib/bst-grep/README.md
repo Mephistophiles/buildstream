@@ -15,18 +15,13 @@ can live in a different environment from bst-grep.
 From the repository root:
 
 ```sh
-pipx install ./contrib/bst-grep
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-grep
 bst-grep -C /path/to/project pthread_setspecific libcxx.bst
 ```
 
-Or install directly from this branch:
-
-```sh
-pipx install 'git+https://github.com/Mephistophiles/buildstream.git@bst-tree#subdirectory=contrib/bst-grep'
-```
-
-If the command is missing, run `pipx ensurepath` and open a new terminal. To
-update from a local checkout, run `pipx install --force ./contrib/bst-grep`.
+The shared `bst-tools-core` dependency is installed from the same checkout.
+Re-run the install command after an update. See the [suite installation guide](../bst-tools-core/README.md)
+for a single environment containing all commands.
 
 ## Usage
 
@@ -160,19 +155,20 @@ each tree is searched; only one element checkout is retained at a time.
 ## Development
 
 ```sh
-python -m pip install -e './contrib/bst-grep[test]'
+python -m pip install -e ./contrib/bst-tools-core -e './contrib/bst-grep[test]'
 python -m pytest -c contrib/bst-grep/pyproject.toml contrib/bst-grep/tests
 
 # Install the real BuildStream and patch source plugin used by the live fixtures.
-python -m pip install -e './contrib/bst-grep[test,live]'
+python -m pip install -e ./contrib/bst-tools-core -e './contrib/bst-grep[test,live]'
 # Requires working bst/buildbox-casd, ripgrep, patch, bubblewrap on Linux,
 # and permission to create sockets.
 BST_GREP_TEST_LIVE=1 python -m pytest -c contrib/bst-grep/pyproject.toml contrib/bst-grep/tests
 ```
 
-The project has its own packaging and CI. `project.py` owns the public BuildStream
-CLI contract, `search.py` translates streaming ripgrep events, `process.py` owns
-subprocess cleanup, and `cli.py` handles arguments, provenance and presentation.
+The project has its own packaging and CI. `search.py` translates streaming
+ripgrep events, and `cli.py` handles provenance and presentation. Public
+BuildStream queries, scoped paths, source/configuration contexts and process
+ownership are implemented once in `bst-tools-core`.
 Tests exercise real ripgrep, malformed CLI data, globs, context, unusual filenames,
 partial failure and cancellation. Opt-in live tests cover local sources, patched
 sources, junctions, dependency selection, project options and dirty workspaces.
@@ -184,7 +180,7 @@ Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
 environment and point it at the actual local BuildStream CAS:
 
 ```sh
-python -m pip install ./contrib/bst-cas ./contrib/bst-grep
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-grep
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
 bst-grep --in artifacts --deps run -g '*.h' pthread product.bst
 ```

@@ -1,9 +1,9 @@
 name: bst-blame
 on:
   push:
-    paths: ['contrib/bst-blame/**', '.github/workflows/bst-blame.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-blame/**', '.github/workflows/bst-blame.yml']
   pull_request:
-    paths: ['contrib/bst-blame/**', '.github/workflows/bst-blame.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-blame/**', '.github/workflows/bst-blame.yml']
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '${{ matrix.python }}'
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - run: python -m pip install './contrib/bst-blame[test,live]' 'BuildStream==2.8.0'
+      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-blame[test,live]' 'BuildStream==2.8.0'
       - run: python -m pytest -c contrib/bst-blame/pyproject.toml contrib/bst-blame/tests
         env:
           BST_BLAME_TEST_LIVE: "1"

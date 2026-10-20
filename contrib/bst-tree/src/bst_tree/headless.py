@@ -16,35 +16,11 @@
 from collections import deque
 import json
 import sys
-import subprocess
 
 from .adapter import capture
-from .artifact_process import CommandRunner
-from .artifact_cli import positive_float, positive_int
+from bst_tools_core.process import CliRunner
+from bst_tools_core.cli import positive_float, positive_int
 from .model import Graph, read_snapshot
-
-
-class HeadlessRunner:
-    """Adapt the bounded process runner to the public bst show/inspection APIs."""
-
-    def __init__(self, timeout=120, limit=32 * 1024 * 1024):
-        self.runner = CommandRunner()
-        self.timeout, self.limit = timeout, limit
-
-    def __call__(self, arguments, **kwargs):
-        result = self.runner(arguments, timeout=self.timeout, limit=self.limit)
-        if result.timed_out:
-            raise ValueError("BuildStream command timed out")
-        if result.truncated:
-            raise ValueError("BuildStream output exceeded --output-limit; increase it and retry")
-        if result.returncode:
-            raise ValueError(result.stderr.strip() or f"bst exited {result.returncode}")
-        if result.stderr:
-            print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
-        return subprocess.CompletedProcess(arguments, result.returncode, result.stdout)
-
-    def cancel(self):
-        self.runner.cancel()
 
 
 def project_arguments(sub):
@@ -227,7 +203,7 @@ def run_graph_query(args):
         raise ValueError("--snapshot cannot be combined with live targets or project arguments")
     if not args.snapshot and not args.targets:
         raise ValueError(args.command + " requires graph targets or --snapshot")
-    runner = HeadlessRunner(args.timeout, args.output_limit)
+    runner = CliRunner(args.timeout, args.output_limit)
     try:
         if args.snapshot == "-":
             graph = Graph.from_dict(json.load(sys.stdin))

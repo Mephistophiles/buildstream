@@ -20,10 +20,18 @@ import sys
 import pytest
 
 from bst_tree.cli import main
-from bst_tree.headless import HeadlessRunner, query_graph, render_graph
+from bst_tools_core.process import CliRunner
+from bst_tree.headless import query_graph, render_graph
 from bst_tree.model import Graph, write_snapshot
-from bst_tree.artifact_process import Execution
+from bst_tools_core.process import Execution
 from bst_tree.inspection import ArtifactEntry, Inspection
+
+
+def test_artifact_comparison_is_not_a_tree_command(capsys):
+    with pytest.raises(SystemExit) as error:
+        main(["artifact-diff", "old", "new"])
+    assert error.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def graph():
@@ -104,7 +112,7 @@ def test_live_capture_options_timeout_and_stderr_separation(monkeypatch, capsys)
 
     monkeypatch.setattr("bst_tree.headless.capture", capture)
     monkeypatch.setattr(
-        "bst_tree.headless.CommandRunner.__call__", lambda self, args, **kw: Execution(0, "data", "progress\n")
+        "bst_tools_core.process.CommandRunner.__call__", lambda self, args, **kw: Execution(0, "data", "progress\n")
     )
     assert main(["tree", "app", "-C", "/project", "--option", "arch", "aarch64", "--format", "json"]) == 0
     captured = capsys.readouterr()
@@ -122,8 +130,8 @@ def test_live_capture_options_timeout_and_stderr_separation(monkeypatch, capsys)
     ],
 )
 def test_bounded_runner_rejects_incomplete_results(monkeypatch, result, message):
-    monkeypatch.setattr("bst_tree.headless.CommandRunner.__call__", lambda self, args, **kw: result)
-    runner = HeadlessRunner()
+    monkeypatch.setattr("bst_tools_core.process.CommandRunner.__call__", lambda self, args, **kw: result)
+    runner = CliRunner()
     try:
         with pytest.raises(ValueError, match=message):
             runner(["bst"])
@@ -306,7 +314,7 @@ def test_real_inspector_checkout_is_removed_on_success_and_preview_error(tmp_pat
             return Execution(0)
         raise AssertionError(arguments)
 
-    monkeypatch.setattr("bst_tree.headless.CommandRunner.__call__", command)
+    monkeypatch.setattr("bst_tools_core.process.CommandRunner.__call__", command)
     for path, expected in ((".hidden", 0), ("missing", 2)):
         assert (
             main(

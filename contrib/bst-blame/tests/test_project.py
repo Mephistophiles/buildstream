@@ -13,7 +13,7 @@
 #
 import pytest
 
-from bst_blame.project import Graph, Project
+from bst_tools_core.project import Graph, Project
 from helpers import framed, node
 
 

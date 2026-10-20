@@ -14,11 +14,21 @@
 import json
 import threading
 import pytest
-from bst_tree.artifacts import Archive, ArtifactComparison
+from bst_tools_core.archive import Archive
 from bst_tree.cli import main
 from bst_tree.model import Graph, write_snapshot
 from bst_tree.size import size_report
-from test_artifacts import archive, pair, FakeRunner
+import io
+import tarfile
+
+
+def archive(path, files):
+    with tarfile.open(path, "w") as bundle:
+        for name, data in files:
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+    return path
 
 
 def graph():
@@ -64,23 +74,3 @@ def test_offline_size_cli_snapshot_budget_and_missing(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["coverage"]["missing"] == ["shared"]
     assert main(["size", "--archive", "a", str(tmp_path / "a.tar")]) == 0
     assert "4 B" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("code,status", [(0, "analyzed"), (1, "error"), (-9, "error")])
-def test_bloaty_diff_direction_and_status(tmp_path, monkeypatch, code, status):
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: "/usr/bin/" + name)
-    runner = FakeRunner(code=code)
-    session = ArtifactComparison(
-        *(str(p) for p in pair(tmp_path)), archives=True, runner=runner, bloaty_sources="sections,compileunits"
-    )
-    try:
-        session.load()
-        result = session.analyze("bloaty", "lib/libx.so")
-        assert result["status"] == status
-        argv = runner.calls[0][0]
-        assert argv[argv.index("-d") + 1] == "sections,compileunits"
-        assert "/after/" in argv[-3] and argv[-2] == "--" and "/before/" in argv[-1]
-        with pytest.raises(ValueError):
-            session.analyze("bloaty", "etc/config")
-    finally:
-        session.close()

@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-from bst_grep.process import child, execute
+from bst_tools_core.process import child, execute
 
 
 def test_stderr_cannot_deadlock_streaming_stdout():

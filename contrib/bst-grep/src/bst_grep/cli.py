@@ -22,7 +22,7 @@ import shutil
 import sys
 
 from . import __version__
-from .project import Project
+from bst_tools_core.project import Project
 from .search import rg_arguments, search, validate
 
 

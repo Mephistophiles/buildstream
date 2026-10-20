@@ -49,7 +49,7 @@ def project(cas, monkeypatch):
             ]
 
         def graph(self, *args):
-            from bst_blame.project import Graph
+            from bst_tools_core.project import Graph
 
             nodes = {
                 n: {"kind": "import", "state": "cached", "full-key": "key-" + n, "build-deps": [], "runtime-deps": []}
@@ -157,7 +157,7 @@ def test_size_uses_digests_and_shared_tree_once(cas, database, project, monkeypa
         def cancel(self):
             pass
 
-    monkeypatch.setattr(size, "HeadlessRunner", Runner)
+    monkeypatch.setattr(size, "CliRunner", Runner)
     args = [
         "size",
         "one.bst",

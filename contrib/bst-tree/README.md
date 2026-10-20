@@ -10,17 +10,18 @@ For Midnight Commander panels and live project bookmarks, see
 
 ## Installation and quick start
 
-From the repository root:
+From the repository root, in your chosen Python environment:
 
 ```sh
-pipx install ./contrib/bst-tree
+python -m pip install ./contrib/bst-tools-core './contrib/bst-tree[tui]'
 bst-tree browse -C /path/to/project app.bst
 ```
 
-If the command is not found, run `pipx ensurepath` and open a new terminal.
-Install project plugins into the environment that provides `bst`, not bst-tree's
-isolated environment. Activate that environment first if needed.
-To update from a changed checkout, run `pipx install --force ./contrib/bst-tree`.
+For headless commands, install `./contrib/bst-tree` without `[tui]`; Textual is
+then neither installed nor imported. Install BuildStream project plugins into
+the environment providing `bst`, which may be separate. Re-run the same install
+command after updating the checkout. See the [tool suite](../bst-tools-core/README.md)
+for installing all commands together.
 
 ## Commands
 
@@ -31,7 +32,6 @@ To update from a changed checkout, run `pipx install --force ./contrib/bst-tree`
 | `snapshot -C PROJECT TARGET... -o FILE` | Save the full graph as JSON | Working `bst` and project plugins; no terminal required |
 | `diff OLD NEW` | Compare saved graphs as text or JSON | Neither `bst` nor a terminal required |
 | `diff OLD NEW --tui` | Inspect changes and dependency candidates interactively | A terminal; no `bst` required |
-| `artifact-diff OLD NEW` | Compare artifact files, metadata, ABI and nested formats | Working `bst`, or two local tar archives with `--archives`; analyzers optional |
 | `tree TARGET...` | Print dependencies, optionally filtering names with `--match` | Working `bst`, or a saved graph with `--snapshot` |
 | `rdeps ELEMENT TARGET...` | Print direct or transitive consumers in the loaded graph | Working `bst`, or a saved graph with `--snapshot` |
 | `paths ELEMENT TARGET...` | Print one shortest path per target to an element | Working `bst`, or a saved graph with `--snapshot` |
@@ -381,7 +381,7 @@ data: source provenance may contain URLs and other plugin-provided information.
 From the repository root, in a development virtualenv:
 
 ```sh
-python -m pip install -e './contrib/bst-tree[test]'
+python -m pip install -e ./contrib/bst-tools-core -e './contrib/bst-tree[test,tui]'
 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
 # Opt in only with a working bst and buildbox-casd installation:
 BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
@@ -403,93 +403,8 @@ Linux/aarch64 sandbox target without executing target binaries. On macOS,
 `buildbox-casd` may require a higher file-descriptor limit such as
 `ulimit -n 4096`; projects may also need an explicit `sandbox.build-arch`.
 
-## Artifact content comparison
-
-Compare two immutable artifact refs (`project/normalized-element/full-key`), two
-cached element names, or a ref and an element. An element name resolves against
-the current project, so use refs to retain an older revision. Both checkouts use
-the same project directory and repeated `--option NAME VALUE` settings.
-
-```sh
-bst-tree artifact-diff myproject/app/OLD_FULL_KEY app.bst -C /project --tui
-bst-tree artifact-diff before.tar after.tar --archives --tui
-bst-tree artifact-diff before.tar after.tar --archives --path etc/config --format json
-bst-tree artifact-diff before.tar after.tar --archives --abidiff --diffoscope --check
-bst-tree artifact-diff before.tar after.tar --archives --diffoscope-html report.html
-```
-
-Live comparison exports each artifact with `bst artifact checkout --deps none
---no-integrate --tar …`. It never builds or runs integration commands; checkout
-may retrieve missing data from configured artifact remotes. Both archives consume
-temporary disk space until the command closes. `--archives` reads two existing
-checkout tar archives without BuildStream or the original project; it cannot be
-combined with project arguments. Graph snapshots do not contain artifact files
-and are not inputs to this command.
-
-The initial comparison streams SHA-256 over the complete contents of regular
-files and compares type, permission bits, numeric uid/gid, link targets and device
-numbers. It reports additions, removals and modifications. Timestamps, extended
-attributes, textual owner names and the archive's root directory entry are ignored.
-Renames appear as removal/addition. Hardlinks are resolved only to regular members
-inside the archive; symlinks and special files are never extracted or followed.
-Unsafe paths, duplicate entries and invalid hardlink chains are rejected.
-
-Only changes are listed by default. `--all` also lists unchanged entries;
-repeatable `--path` selects **exact relative paths**, including unchanged paths,
-without glob expansion. Text previews show a unified diff with three context lines
-and at most 256 KiB per side; full-content hashes remain authoritative. Binary
-files are identified instead of decoded. CLI summaries are abbreviated; JSON and
-the TUI retain the captured report up to the configured limits.
-
-In the artifact TUI, the file list and detail pane stay visible together (stacked
-on narrow terminals). **All / Content / Metadata / ELF** filters and `/` path
-search narrow the list. `a` runs **abidiff** for the selected paired ELF file;
-`d` runs **diffoscope** for the selected paired regular file, and `Shift+D` runs
-it on both whole archives, including additions/removals and nested formats. Use
-`f` to choose overview, text, metadata or an analyzer report; Tab changes focus,
-arrow keys or `j`/`k` navigate/scroll, and `q` or Escape closes and cancels pending
-work. Escape in search returns focus to the file list. Tool errors remain visible
-and the action can be retried. Analyses run only when requested by a shortcut or
-CLI flag, so opening a large artifact does not automatically launch every analyzer.
-
-### Optional analyzers
-
-Install `abidiff` and `diffoscope` on PATH independently of bst-tree. For example,
-Debian/Ubuntu provide `abigail-tools` and `diffoscope-minimal`; additional diffoscope
-comparators improve the detail available for particular formats. A missing requested
-tool is an explicit analysis error; inventory and text comparison work without them.
-
-`--abidiff` analyzes changed files that are ELF on both sides; explicit `--path`
-also permits unchanged ELF pairs. Added/removed ELF files and type changes remain
-inventory changes. The
-[abidiff exit status](https://sourceware.org/libabigail/manual/abidiff.html)
-is decoded as a bitmask: 0 means no reported change, 4 means change requiring
-review, and 12 means an incompatible change was reported. Other statuses are
-errors. **Exit 4 does not prove compatibility**, and no reported ABI change does
-not guarantee a complete comparison. Type analysis depends on debug information;
-stripped binaries can provide only their available ELF interfaces. Provide separate
-host debug roots with repeated `--debug-info-dir-old DIR` and
-`--debug-info-dir-new DIR`. Embedded separate debug files are not automatically
-extracted alongside a selected binary. Host default suppression files are disabled;
-explicit `--abidiff-suppression FILE` options are recorded in the report.
-
-`--diffoscope` compares the whole archives, or each selected `--path` file pair.
-For added/removed files, omit `--path` to analyze the whole archives. The
-[diffoscope statuses](https://manpages.debian.org/unstable/diffoscope-minimal/diffoscope.1.en.html)
-0/1/other mean no reported difference/difference/error. `--diffoscope-html FILE`
-implies diffoscope, accepts at most one selected path, and atomically replaces
-that file only after a successful analysis (including an empty report for equal
-inputs). HTML output can show deeper nested format differences than the summary.
-
-`--timeout SECONDS` bounds each checkout/analyzer command (default 120 seconds).
-Timeout and cancellation terminate the owned subprocess group. Selected files are
-materialized only when required, privately and without executable permission.
-`--report-limit BYTES` bounds captured output per stream and diffoscope report
-sizes (default 1 MiB); external comparators and report limits can affect detail.
-Reports distinguish tool failure, timeout, unavailable tools and reported changes.
-Normal success exits 0; `--check` exits 1 for selected inventory or analyzer
-changes. Requested analysis errors exit 2 even without `--check`; cancellation
-exits 130. `--check` measures all selected file changes, not ABI compatibility alone.
+Artifact file comparison, ABI reports, diffoscope and Bloaty are provided by the
+separate [bst-diff](../bst-diff/README.md) project.
 
 ## Headless queries and inspection
 
@@ -497,7 +412,7 @@ exits 130. `--check` measures all selected file changes, not ABI compatibility a
 Their default is plain text; `--format json` produces one JSON document on stdout.
 BuildStream diagnostics and errors go to stderr. Exit statuses are 0 for a
 successful query (including an empty result), 2 for errors and 130 for cancellation.
-Existing `diff` and `artifact-diff` also support headless text/JSON and `--check`.
+Graph `diff` also supports headless text/JSON and `--check`.
 
 ```sh
 bst-tree tree app.bst sdk.bst -C /project --scope build
@@ -584,15 +499,13 @@ error rather than a silently partial graph or inspection. Cancellation and timeo
 terminate the owned subprocess group. These limits do not cap the size of a saved
 graph read from disk or stdin, or the number of source files listed locally.
 
-## Artifact size and binary growth
+## Artifact and closure sizes
 
 ```sh
 bst-tree size product.bst sdk.bst -C /project --scope run --format json
 bst-tree size product.bst -C /project --check-max 100000000
 bst-tree size --archive app.bst app.tar --archive runtime.bst runtime.tar
 bst-tree size --snapshot graph.json --archive app.bst app.tar --archive runtime.bst runtime.tar
-bst-tree artifact-diff old.tar new.tar --archives --bloaty --path usr/lib/libapp.so
-bst-tree artifact-diff old.tar new.tar --archives --bloaty --bloaty-sources sections,compileunits --format json
 ```
 
 `size` reads each selected artifact once, hashing regular contents in a temporary
@@ -615,18 +528,7 @@ symlink bodies and archive headers are excluded. These distinctions also appear
 in the versioned JSON report. `--check-max BYTES` exits 1 only for a complete total
 above the budget; incomplete/error exits 2. Normal success exits 0.
 
-`artifact-diff --bloaty` profiles changed paired ELF files, or explicit selected
-ELF pairs. Install the optional `bloaty` executable on PATH. Text, JSON and TUI
-reports use the same analyzer; in the artifact TUI press **b** for Bloaty. The
-report compares new against old, with at most 30 rows per level, and distinguishes
-file size from ELF VM size (which is not process RSS). `--bloaty-sources` accepts
-comma-separated `sections`, `symbols`, `segments` and `compileunits`; defaults to
-`sections,symbols`. Symbol/compile-unit attribution depends on symbols/debug info
-available in the selected binary; separate debug files are not automatically
-extracted. Bloaty exit 0 means `analyzed`, not that sizes are unchanged; nonzero,
-missing executables and timeouts are errors. Inventory hashes and `--check` remain
-the authoritative selected-file change check. Existing timeout/cancellation and
-captured-output bounds apply; no target binary is executed.
+For binary growth attribution, use [bst-diff --bloaty](../bst-diff/README.md).
 
 ## Configuration provenance
 
@@ -691,7 +593,7 @@ Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
 environment and point it at the actual local BuildStream CAS:
 
 ```sh
-python -m pip install ./contrib/bst-cas ./contrib/bst-tree
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-tree
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
 bst-tree size product.bst --format json
 ```

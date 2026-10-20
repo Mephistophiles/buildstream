@@ -13,7 +13,7 @@
 #
 """Progressive disclosure for snapshot comparisons: overview, then one section's diff."""
 
-from rich.text import Text
+from bst_tools_core.ui import diff_text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -21,19 +21,6 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
 from .explain import CATEGORY_LABELS, analyze, overview, sections, unified
-
-
-def diff_text(content):
-    """Explicit high-contrast diff colors, independent of a syntax theme."""
-    result = Text()
-    for line in content.splitlines():
-        style = (
-            "bold cyan" if line.startswith(("---", "+++", "@@")) else
-            "bold #65d68b" if line.startswith("+") else
-            "#ff8080" if line.startswith("-") else "dim"
-        )
-        result.append(line + "\n", style=style)
-    return result
 
 
 class DiffExplorer(App):
@@ -56,17 +43,33 @@ class DiffExplorer(App):
     #body.compact #right { width: 100%; height: 1fr; }
     """
     BINDINGS = [
-        ("q", "quit", "Quit"), ("m", "semantic", "Reachability"),
+        ("q", "quit", "Quit"),
+        ("m", "semantic", "Reachability"),
         ("slash", "search", "Search"),
-        ("0", "filter('all')", "All"), ("1", "filter('local')", "Inputs"),
-        ("2", "filter('dependency')", "Deps"), ("3", "filter('unknown')", "Unexplained"),
-        ("f", "sections", "Section"), ("c", "context", "More context"),
-        Binding("j", "down", "Down", show=False), Binding("k", "up", "Up", show=False),
+        ("0", "filter('all')", "All"),
+        ("1", "filter('local')", "Inputs"),
+        ("2", "filter('dependency')", "Deps"),
+        ("3", "filter('unknown')", "Unexplained"),
+        ("f", "sections", "Section"),
+        ("c", "context", "More context"),
+        Binding("j", "down", "Down", show=False),
+        Binding("k", "up", "Up", show=False),
         Binding("escape", "back", "Elements", show=False),
     ]
 
-    def __init__(self, old, new, *, fields=None, show_all=False, labels=("before", "after"),
-                 semantic=False, semantic_scope="all", semantic_targets=None, semantic_model=None):
+    def __init__(
+        self,
+        old,
+        new,
+        *,
+        fields=None,
+        show_all=False,
+        labels=("before", "after"),
+        semantic=False,
+        semantic_scope="all",
+        semantic_targets=None,
+        semantic_model=None,
+    ):
         super().__init__()
         self.old, self.new = old, new
         self.fields = fields
@@ -90,22 +93,36 @@ class DiffExplorer(App):
             f"{len(self.records)} changed elements  ·  "
             f"{counts.get('local', 0)} observed inputs  ·  "
             f"{counts.get('dependency', 0)} dependency candidates  ·  "
-            f"{counts.get('unknown', 0)} unexplained", id="summary", markup=False,
+            f"{counts.get('unknown', 0)} unexplained",
+            id="summary",
+            markup=False,
         )
         warnings = self.report["warnings"]
-        yield Static("\n".join(warnings[1:]) or "Dependency candidates indicate correlation; inspect evidence below.",
-                     id="warning", markup=False)
+        yield Static(
+            "\n".join(warnings[1:]) or "Dependency candidates indicate correlation; inspect evidence below.",
+            id="warning",
+            markup=False,
+        )
         with Horizontal(id="filters"):
-            yield Tabs(Tab("All", id="all"), Tab("Inputs", id="local"),
-                       Tab("Dependencies", id="dependency"), Tab("Unexplained", id="unknown"),
-                       active=self.category, id="categories")
+            yield Tabs(
+                Tab("All", id="all"),
+                Tab("Inputs", id="local"),
+                Tab("Dependencies", id="dependency"),
+                Tab("Unexplained", id="unknown"),
+                active=self.category,
+                id="categories",
+            )
             yield Input(placeholder="Filter element names…", id="search")
         with Container(id="body"):
             yield DataTable(id="elements", cursor_type="row")
             with Vertical(id="right"):
                 yield Static("Snapshot context", id="selection", markup=False)
-                yield Select([("Overview", "overview"), ("Snapshot context", "context")],
-                             value="overview", allow_blank=False, id="section")
+                yield Select(
+                    [("Overview", "overview"), ("Snapshot context", "context")],
+                    value="overview",
+                    allow_blank=False,
+                    id="section",
+                )
                 yield RichLog(id="diff", wrap=True, markup=False, highlight=False, auto_scroll=False)
         yield Footer()
 
@@ -124,7 +141,14 @@ class DiffExplorer(App):
 
     def check_action(self, action, parameters):
         if len(self.screen_stack) > 1 and action in {
-            "filter", "search", "sections", "context", "back", "down", "up", "semantic",
+            "filter",
+            "search",
+            "sections",
+            "context",
+            "back",
+            "down",
+            "up",
+            "semantic",
         }:
             return False
         if isinstance(self.focused, Input) and action != "back":
@@ -149,8 +173,12 @@ class DiffExplorer(App):
         if self.show_all and self.category == "all":
             names |= self.old.nodes.keys() | self.new.nodes.keys()
         self.row_names = sorted(
-            (name for name in names if query in name.casefold()
-             and (self.category == "all" or self.records[name]["category"] == self.category)),
+            (
+                name
+                for name in names
+                if query in name.casefold()
+                and (self.category == "all" or self.records[name]["category"] == self.category)
+            ),
             key=lambda name: (priority[self.records.get(name, {}).get("category", "unchanged")], name),
         )
         for name in self.row_names:
@@ -177,8 +205,7 @@ class DiffExplorer(App):
         self.query_one("#selection", Static).update(name or "Snapshot context / no matching elements")
         options = [("Overview", "overview")]
         if name is not None:
-            options += [("Diff · " + section, section)
-                        for section in sections(self.old, self.new, name, self.fields)]
+            options += [("Diff · " + section, section) for section in sections(self.old, self.new, name, self.fields)]
             record = self.records.get(name)
             if record and record["candidates"]:
                 options.append(("Dependency candidates", "candidates"))
@@ -220,20 +247,26 @@ class DiffExplorer(App):
                 log.write(diff_text(unified(self.old, self.new, None, "context")))
         elif section in ("candidates", "consumers") and record:
             if section == "candidates":
-                log.write(f"Build input candidates: {record['candidate_count']} (showing {len(record['candidates'])}).\n"
-                          "Causality is not proven. Full lists: --explain --format json.\n")
+                log.write(
+                    f"Build input candidates: {record['candidate_count']} (showing {len(record['candidates'])}).\n"
+                    "Causality is not proven. Full lists: --explain --format json.\n"
+                )
                 for candidate in record["candidates"]:
                     log.write(candidate["name"] + " — " + candidate["reason"])
             else:
-                log.write(f"Changed consumers: {record['consumer_count']} (showing {len(record['consumers'])}).\n"
-                          "Full lists: --explain --format json.\n")
+                log.write(
+                    f"Changed consumers: {record['consumer_count']} (showing {len(record['consumers'])}).\n"
+                    "Full lists: --explain --format json.\n"
+                )
                 for consumer in record["consumers"]:
                     log.write(consumer)
         elif section == "context":
             log.write("\n".join(self.report["warnings"]) + "\n")
             log.write(diff_text(unified(self.old, self.new, None, "context", full=self.full_context)))
         elif name is not None and section is not Select.BLANK:
-            log.write(diff_text(unified(self.old, self.new, name, section, full=self.full_context, fields=self.fields)))
+            log.write(
+                diff_text(unified(self.old, self.new, name, section, full=self.full_context, fields=self.fields))
+            )
 
         log.scroll_home(animate=False)
 

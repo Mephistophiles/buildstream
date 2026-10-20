@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from bst_grep.project import Paths, Project, checkout_root
+from bst_tools_core.project import Paths, Project, checkout_root
 
 
 def framed(args, records):

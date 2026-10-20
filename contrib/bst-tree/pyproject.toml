@@ -9,9 +9,10 @@ description = "Explore and compare BuildStream dependency graphs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["ruamel.yaml>=0.16.7", "textual>=8.2,<9"]
+dependencies = ["bst-tools-core>=0.1,<0.2"]
 
 [project.optional-dependencies]
+tui = ["textual>=8.2,<9", "bst-tools-core[tui]>=0.1,<0.2"]
 cas = ["bst-cas>=0.1,<0.2"]
 test = ["pytest>=8", "pytest-asyncio>=0.24"]
 

@@ -14,10 +14,23 @@
 import io
 import json
 import tarfile
+import subprocess
+import sys
 
 import pytest
 
-from bst_tree.cli import main
+from bst_diff.cli import main
+
+
+def test_help_imports_neither_tree_nor_textual():
+    script = (
+        "import sys; from bst_diff.cli import main\n"
+        "try: main(['--help'])\nexcept SystemExit as error: assert error.code == 0\n"
+        "assert not any(n.split('.')[0] in ('bst_tree', 'textual', 'buildstream') for n in sys.modules)"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "bst-diff" in result.stdout and "artifact-diff" not in result.stdout
 
 
 def pair(tmp_path):
@@ -35,26 +48,26 @@ def pair(tmp_path):
 
 def test_artifact_cli_offline_diff_and_exit_codes(tmp_path, capsys):
     a, b = pair(tmp_path)
-    assert main(["artifact-diff", a, b, "--archives", "--format", "json", "--check"]) == 1
+    assert main([a, b, "--archives", "--format", "json", "--check"]) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["comparison"] == "artifacts"
     assert report["summary"]["modified"] == 1
-    assert main(["artifact-diff", a, a, "--archives", "--check"]) == 0
+    assert main([a, a, "--archives", "--check"]) == 0
     capsys.readouterr()
-    assert main(["artifact-diff", a, b, "--archives", "--path", "etc/config"]) == 0
+    assert main([a, b, "--archives", "--path", "etc/config"]) == 0
     output = capsys.readouterr().out
     assert "-old" in output and "+new" in output
-    assert main(["artifact-diff", a, b, "--archives", "--path", "absent"]) == 2
+    assert main([a, b, "--archives", "--path", "absent"]) == 2
     assert "absent" in capsys.readouterr().err
 
 
 def test_artifact_cli_analyzer_errors_are_not_differences(tmp_path, capsys, monkeypatch):
     a, b = pair(tmp_path)
-    monkeypatch.setattr("bst_tree.artifacts.shutil.which", lambda name: None)
-    assert main(["artifact-diff", a, b, "--archives", "--diffoscope", "--format", "json"]) == 2
+    monkeypatch.setattr("bst_diff.artifacts.shutil.which", lambda name: None)
+    assert main([a, b, "--archives", "--diffoscope", "--format", "json"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["analyses"][0]["status"] == "unavailable"
-    assert main(["artifact-diff", a, b, "--archives", "--diffoscope"]) == 2
+    assert main([a, b, "--archives", "--diffoscope"]) == 2
     assert "incomplete" in capsys.readouterr().out
 
 
@@ -69,7 +82,7 @@ def test_artifact_cli_analyzer_errors_are_not_differences(tmp_path, capsys, monk
 )
 def test_artifact_cli_invalid_modes_do_not_export(tmp_path, capsys, flags):
     a, b = pair(tmp_path)
-    assert main(["artifact-diff", a, b, *flags]) == 2
+    assert main([a, b, *flags]) == 2
     assert capsys.readouterr().err
 
 
@@ -78,5 +91,5 @@ def test_artifact_cli_invalid_modes_do_not_export(tmp_path, capsys, flags):
 )
 def test_artifact_cli_invalid_limits(flag, value):
     with pytest.raises(SystemExit) as error:
-        main(["artifact-diff", "old", "new", flag, value])
+        main(["old", "new", flag, value])
     assert error.value.code == 2

@@ -16,18 +16,13 @@ different Python environment from bst-blame.
 From the repository root:
 
 ```sh
-pipx install ./contrib/bst-blame
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-blame
 bst-blame /usr/lib/libc++.so product.bst
 ```
 
-Or install directly:
-
-```sh
-pipx install 'git+https://github.com/Mephistophiles/buildstream.git@bst-tree#subdirectory=contrib/bst-blame'
-```
-
-Use `pipx ensurepath` if the command is missing. To update a local installation,
-run `pipx install --force ./contrib/bst-blame`.
+The shared `bst-tools-core` dependency is installed from the same checkout.
+Re-run the install command after an update. See the [suite installation guide](../bst-tools-core/README.md)
+for a single environment containing all commands.
 
 ## Usage
 
@@ -162,12 +157,12 @@ are unsupported. This default mode has no persistent index or dependency on priv
 Optional direct CAS mode uses the shared persistent index described below.
 
 ```sh
-python -m pip install -e './contrib/bst-blame[test]'
+python -m pip install -e ./contrib/bst-tools-core -e './contrib/bst-blame[test]'
 python -m pytest -c contrib/bst-blame/pyproject.toml contrib/bst-blame/tests
 
 # Real BuildStream integration requires working buildbox-casd, bubblewrap on
 # Linux, and permission to create sockets. No target programs are executed.
-python -m pip install -e './contrib/bst-blame[test,live]'
+python -m pip install -e ./contrib/bst-tools-core -e './contrib/bst-blame[test,live]'
 BST_BLAME_TEST_LIVE=1 python -m pytest -c contrib/bst-blame/pyproject.toml contrib/bst-blame/tests
 ```
 
@@ -178,7 +173,7 @@ Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
 environment and point it at the actual local BuildStream CAS:
 
 ```sh
-python -m pip install ./contrib/bst-cas ./contrib/bst-blame
+python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-blame
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
 bst-blame /usr/lib/libc++.so product.bst --compare-content --json
 ```
@@ -194,3 +189,7 @@ Ownership queries read CAS inventories instead of paired human-formatted file
 listings. `--compare-content` and `--diff` verify/read CAS blobs directly, with no
 tar export. Multiple owners remain explicit even when they share a tree digest.
 `coverage.cas_index` includes reuse statistics.
+
+Shared public CLI framing, process ownership and path validation live in
+[bst-tools-core](../bst-tools-core/README.md); application packages do not import
+each other.

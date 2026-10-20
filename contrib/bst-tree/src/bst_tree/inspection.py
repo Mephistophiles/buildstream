@@ -22,7 +22,8 @@ import threading
 import subprocess
 import tarfile
 
-from .adapter import command_base
+from bst_tools_core.project import command_base
+from bst_tools_core.process import CliRunner
 
 
 @dataclass
@@ -41,10 +42,10 @@ class Inspection:
 
 
 class ProjectInspector:
-    def __init__(self, directory=None, options=(), *, run=subprocess.run, cancel=None):
+    def __init__(self, directory=None, options=(), *, run=None, cancel=None):
         self.base = command_base(directory, options)
-        self.run = run
-        self._cancel = cancel or (lambda: None)
+        self.run = run if run is not None else CliRunner()
+        self._cancel = cancel or getattr(self.run, "cancel", lambda: None)
         self._lock = threading.Lock()
         self._cancelled = False
         self._checkout = None
@@ -78,10 +79,19 @@ class ProjectInspector:
                 temporary = tempfile.TemporaryDirectory(prefix="bst-tree-artifact-")
                 archive = Path(temporary.name) / "artifact.tar"
                 try:
-                    self.execute([
-                        "artifact", "checkout", "--deps", "none", "--no-integrate",
-                        "--tar", str(archive), "--", name,
-                    ])
+                    self.execute(
+                        [
+                            "artifact",
+                            "checkout",
+                            "--deps",
+                            "none",
+                            "--no-integrate",
+                            "--tar",
+                            str(archive),
+                            "--",
+                            name,
+                        ]
+                    )
                     # As with sources, the worker owns cleanup until bst exits.
                     with self._lock:
                         if self._cancelled:
@@ -113,8 +123,17 @@ class ProjectInspector:
             return result
 
     def checkout_command(self, name, directory):
-        return ["source", "checkout", "--deps", "none", "--include-build-scripts",
-                "--directory", str(directory), "--", name]
+        return [
+            "source",
+            "checkout",
+            "--deps",
+            "none",
+            "--include-build-scripts",
+            "--directory",
+            str(directory),
+            "--",
+            name,
+        ]
 
     def checkout_sources(self, name):
         # Keep ownership in the worker until the command finishes. Closing the
@@ -171,7 +190,8 @@ class ProjectInspector:
             workspace = self.show(name, "%{workspace-dirs}").rstrip("\n")
             if not workspace:
                 return Inspection(
-                    "Source provenance (URLs/refs depend on the source plugin):\n" + provenance
+                    "Source provenance (URLs/refs depend on the source plugin):\n"
+                    + provenance
                     + "\nNo open workspace. Press f (or Load source files) to browse a temporary checkout.\n"
                     + "BuildStream uses cached sources or fetches missing sources from configured remotes/upstream.\n"
                     + "The temporary copy is removed when this viewer closes.\n\nCommand:\n"
@@ -181,7 +201,7 @@ class ProjectInspector:
             prefix = "Workspace: "
             if not workspace.startswith(prefix):
                 raise ValueError("Unexpected workspace-dirs output from BuildStream")
-            path = Path(workspace[len(prefix):])
+            path = Path(workspace[len(prefix) :])
             if not path.is_absolute() or not path.is_dir():
                 raise ValueError(f"Workspace directory is unavailable: {path}")
             return Inspection(

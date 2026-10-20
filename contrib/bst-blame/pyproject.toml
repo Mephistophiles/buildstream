@@ -9,7 +9,7 @@ description = "Find BuildStream artifact owners and inspect overlapping file pat
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["ruamel.yaml>=0.16.7"]
+dependencies = ["bst-tools-core>=0.1,<0.2"]
 
 [project.optional-dependencies]
 cas = ["bst-cas>=0.1,<0.2"]

@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from bst_tree.artifact_process import Cancelled, CommandRunner
+from bst_tools_core.process import Cancelled, CommandRunner
 
 
 def test_bounded_output_and_nonzero_are_preserved():
