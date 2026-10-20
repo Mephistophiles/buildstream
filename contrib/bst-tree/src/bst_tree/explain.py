@@ -145,6 +145,11 @@ def analyze(old, new, *, fields=None, limit=None, history=False):
         warnings.append(
             "Input sources are not captured on one or both sides; use snapshot --provenance for both snapshots."
         )
+    if old.details is not None and new.details is not None and (old.provenance is None) != (new.provenance is None):
+        warnings.append(
+            "Resolved input encodings differ (display YAML versus lossless JSON); recapture both with --provenance "
+            "before interpreting scalar-type or whitespace differences."
+        )
     if history and any(
         g.provenance is not None and any(not e["history_available"] for e in g.provenance.values()) for g in (old, new)
     ):

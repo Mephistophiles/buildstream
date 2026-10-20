@@ -109,6 +109,7 @@ def test_compact_sources_conditions_and_explicit_history(tmp_path, capsys):
 def test_one_sided_capture_and_missing_history_are_honest():
     old, new = pair(False)
     old.provenance = None
+    assert "encodings differ" in " ".join(analyze(old, new)["warnings"])
     changes, count = input_changes(old, new, "app.bst", history=True)
     assert count == 2 and changes[0]["old"]["status"] == "not-captured"
     assert changes[0]["new"]["status"] == "captured"

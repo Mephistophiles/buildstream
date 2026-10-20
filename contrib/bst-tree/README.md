@@ -381,6 +381,10 @@ history on one side is reported explicitly; added/removed values are distinguish
 from JSON null. A change only in YAML location/history does not create a resolved
 input difference or affect `--check`. Field filters still apply. Snapshot-only
 diff works without `bst`, project files, or Textual.
+Use the same capture mode for both sides. Mixing older YAML-based `--details`
+snapshots with lossless provenance snapshots can introduce scalar-type or
+whitespace differences from the display encoding; the explanation warns about
+this and recommends recapturing both with `--provenance`.
 
 ## Data and limitations
 
