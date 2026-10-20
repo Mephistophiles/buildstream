@@ -305,6 +305,9 @@ class OptionPool:
 
                 # Apply the yaml fragment if its condition evaluates to true
                 if apply_fragment:
+                    from ..node import _annotate_composition_condition
+
+                    _annotate_composition_condition(value, expression, condition)
                     value._composite(node)
 
             return True

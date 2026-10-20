@@ -1,9 +1,9 @@
 name: bst-origin
 on:
   push:
-    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
   pull_request:
-    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
 permissions:
   contents: read
 jobs:
@@ -18,18 +18,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
-      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0'
-      - name: Test fork Python changes against the released compiled runtime
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap gcc
+      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0' 'Cython>=3.1' pytest-datafiles
+      - name: Compile fork node extension and overlay fork Python modules
         run: |
-          python - <<'PY'
-          import buildstream
-          from pathlib import Path
-          import shutil
-          destination = Path(buildstream.__file__).parent
-          for name in ('_input_provenance.py', 'element.py', '_context.py', '_frontend/cli.py', '_frontend/app.py'):
-              shutil.copyfile(Path('src/buildstream') / name, destination / name)
-          PY
-      - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests/test_origin.py contrib/bst-tree/tests/test_origin_live.py
+          python contrib/bst-tree/tests/build_origin_runtime.py "$RUNNER_TEMP/bst-origin-runtime"
+          echo "PYTHONPATH=$RUNNER_TEMP/bst-origin-runtime" >> "$GITHUB_ENV"
+      - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests/test_origin.py contrib/bst-tree/tests/test_origin_live.py contrib/bst-tree/tests/test_origin_history.py
         env:
           BST_TREE_TEST_ORIGIN: "1"
+      - name: Existing native YAML regression suite without history enabled
+        run: python -m pytest -c contrib/bst-tree/pyproject.toml tests/internals/yaml.py

@@ -58,6 +58,23 @@ from .exceptions import LoadErrorReason
 # to distinguish between a kwarg set to None and an unset kwarg.
 _sentinel = object()
 
+# Optional observer for the explicit provenance-history query. No Node fields
+# or Cython ABI change; ordinary loads retain no history or node references.
+cdef object _composition_observer = None
+
+
+def _set_composition_observer(observer):
+    global _composition_observer
+    previous = _composition_observer
+    _composition_observer = observer
+    return previous
+
+
+def _annotate_composition_condition(node, expression, condition):
+    if _composition_observer is not None:
+        _composition_observer.condition(node, expression, condition)
+
+
 
 cdef class Node:
     """This is the base class for YAML document nodes.
@@ -416,9 +433,12 @@ cdef class ScalarNode(Node):
     #############################################################
 
     cpdef ScalarNode clone(self):
-        return ScalarNode.__new__(
+        cdef ScalarNode result = ScalarNode.__new__(
             ScalarNode, self.file_index, self.line, self.column, self.value
         )
+        if _composition_observer is not None:
+            _composition_observer.cloned(self, result)
+        return result
 
     cpdef object strip_node_info(self):
         return self.value
@@ -443,7 +463,10 @@ cdef class ScalarNode(Node):
                                       self.get_provenance(),
                                       target_value.get_provenance()))
 
-        target.value[key] = self.clone()
+        cdef Node result = self.clone()
+        if _composition_observer is not None:
+            _composition_observer.replaced(self, target_value, result)
+        target.value[key] = result
 
     cdef bint _is_composite_list(self) except *:
         return False
@@ -528,6 +551,8 @@ cdef class MappingNode(Node):
                 node.line = old_value.line
                 node.column = old_value.column
 
+            if _composition_observer is not None:
+                _composition_observer.generated(old_value, node)
             self.value[key] = node
 
     #############################################################
@@ -873,7 +898,10 @@ cdef class MappingNode(Node):
         for key, value in self.value.items():
             copy[key] = value.clone()
 
-        return MappingNode.__new__(MappingNode, self.file_index, self.line, self.column, copy)
+        cdef MappingNode result = MappingNode.__new__(MappingNode, self.file_index, self.line, self.column, copy)
+        if _composition_observer is not None:
+            _composition_observer.cloned(self, result)
+        return result
 
     cpdef object strip_node_info(self):
         cdef str key
@@ -1007,6 +1035,8 @@ cdef class MappingNode(Node):
         cdef SequenceNode prefix = self.value.get("(<)")
         cdef SequenceNode suffix = self.value.get("(>)")
 
+        previous = _composition_observer.snapshot_history(target) if _composition_observer is not None else None
+
         if clobber is not None:
             target.value.clear()
             target.value.extend(clobber.value)
@@ -1015,6 +1045,8 @@ cdef class MappingNode(Node):
                 target.value.insert(0, v)
         if suffix is not None:
             target.value.extend(suffix.value)
+        if _composition_observer is not None:
+            _composition_observer.list_composed(self, target, previous)
 
     # _compose_on_composite_dict(target)
     #
@@ -1029,6 +1061,8 @@ cdef class MappingNode(Node):
         cdef SequenceNode clobber = self.value.get("(=)")
         cdef SequenceNode prefix = self.value.get("(<)")
         cdef SequenceNode suffix = self.value.get("(>)")
+
+        previous = _composition_observer.snapshot_history(target) if _composition_observer is not None else None
 
         if clobber is not None:
             # We want to clobber the target list
@@ -1056,6 +1090,8 @@ cdef class MappingNode(Node):
                     (<SequenceNode> target.value["(>)"]).value.extend(suffix.value)
                 else:
                     target.value["(>)"] = suffix
+        if _composition_observer is not None:
+            _composition_observer.list_composed(self, target, previous)
 
     cdef bint _is_composite_list(self) except *:
         cdef bint has_directives = False
@@ -1377,7 +1413,10 @@ cdef class SequenceNode(Node):
         for entry in self.value:
             copy.append(entry.clone())
 
-        return SequenceNode.__new__(SequenceNode, self.file_index, self.line, self.column, copy)
+        cdef SequenceNode result = SequenceNode.__new__(SequenceNode, self.file_index, self.line, self.column, copy)
+        if _composition_observer is not None:
+            _composition_observer.cloned(self, result)
+        return result
 
     cpdef object strip_node_info(self):
         cdef Node value
@@ -1417,7 +1456,10 @@ cdef class SequenceNode(Node):
             (<SequenceNode> target.value[key]).value.extend(self.value)
         else:
             # Looks good, clobber it
-            target.value[key] = self.clone()
+            result = self.clone()
+            if _composition_observer is not None:
+                _composition_observer.replaced(self, target_value, result)
+            target.value[key] = result
 
     cdef bint _is_composite_list(self) except *:
         return False

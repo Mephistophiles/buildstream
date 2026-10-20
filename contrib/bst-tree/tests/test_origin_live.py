@@ -28,9 +28,11 @@ def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path
     root = tmp_path / "project"
     (root / "elements").mkdir(parents=True)
     (root / "project.conf").write_text(
-        "name: origin-test\nmin-version: '2.0'\nelement-path: elements\noptions:\n  debug:\n    type: bool\n    description: Debug flags\n    default: false\nvariables:\n  optimization: -O2\nsandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+        "name: origin-test\nmin-version: '2.0'\nelement-path: elements\noptions:\n  debug:\n    type: bool\n    description: Debug flags\n    default: false\nvariables:\n  optimization: -O2\nelements:\n  manual:\n    variables:\n      optimization: -O2.5\nsandbox:\n  build-os: linux\n  build-arch: aarch64\n"
     )
-    (root / "flags.yml").write_text('variables:\n  flags: "%{optimization} -g"\nenvironment:\n  CFLAGS: "%{flags}"\n')
+    (root / "flags.yml").write_text(
+        'variables:\n  optimization: -O1\n  flags: "%{optimization} -g"\nenvironment:\n  CFLAGS: "%{flags}"\n'
+    )
     (root / "elements/app.bst").write_text(
         "kind: manual\n(@): flags.yml\nvariables:\n  optimization: -O3\nconfig:\n  build-commands:\n  - echo %{flags}\n(?):\n- debug:\n    variables:\n      optimization: -O0\n"
     )
@@ -43,6 +45,46 @@ def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path
         assert entries["/vars/optimization"]["value"] == expected
         assert entries["/vars/optimization"]["origin"]["file"].endswith("app.bst")
         assert entries["/vars/optimization"]["origin"]["line"] > 0
+    for extra, expected in [
+        ([], ["-O2", "-O2.5", "-O1", "-O3"]),
+        (["--option", "debug", "True"], ["-O2", "-O2.5", "-O1", "-O3", "-O0"]),
+    ]:
+        assert (
+            main(
+                [
+                    "origin",
+                    "app.bst",
+                    "-C",
+                    str(root),
+                    "--history",
+                    "--path",
+                    "/env/CFLAGS",
+                    "--format",
+                    "json",
+                    *extra,
+                ]
+            )
+            == 0
+        )
+        entries = {entry["path"]: entry for entry in json.loads(capsys.readouterr().out)["elements"][0]["entries"]}
+        steps = entries["/vars/optimization"]["history"]
+        assert [step["raw"] for step in steps] == expected
+        assert steps[-1]["state"] == "effective"
+        assert any(step["origin"]["file"].endswith("flags.yml") for step in steps)
+        if extra:
+            assert steps[-1]["conditions"][0]["expression"] == "debug"
+        else:
+            assert not any(step.get("conditions") for step in steps)
+    assert (
+        main(
+            ["origin", "app.bst", "-C", str(root), "--history", "--path", "/config/build-commands", "--format", "json"]
+        )
+        == 0
+    )
+    entries = {entry["path"]: entry for entry in json.loads(capsys.readouterr().out)["elements"][0]["entries"]}
+    assert entries["/config/build-commands"]["raw"] == ["echo %{flags}"]
+    assert entries["/config/build-commands"]["value"] == ["echo -O3 -g"]
+    assert entries["/config/build-commands"]["history"][-1]["state"] == "effective"
     conflict = subprocess.run(
         ["bst", "-C", str(root), "show", "--provenance", "--format", "%{name}", "app.bst"],
         capture_output=True,

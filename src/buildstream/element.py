@@ -2935,6 +2935,7 @@ class Element(Plugin):
                 "config": self.__config.strip_node_info(),
                 "public": self.__public.strip_node_info(),
             },
+            history=self._get_context()._input_composition_history,
         )
 
     # __initialize_from_yaml()

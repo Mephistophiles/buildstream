@@ -37,6 +37,11 @@ def configure_parser(commands):
         help="RFC 6901 pointer/prefix, e.g. /env/CFLAGS or /config/build-commands",
     )
     p.add_argument("--no-follow", action="store_true", help="Omit transitive variable-reference evidence")
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="Show applied YAML overrides, list composition and conditions; requires rebuilt fork bst",
+    )
     project_arguments(p)
     p.set_defaults(command="origin")
     return p
@@ -80,10 +85,32 @@ def validate_report(report):
                     or not isinstance(ref.get("path"), str)
                 ):
                     raise ValueError("Invalid variable reference")
+            if "history" in entry:
+                if not isinstance(entry["history"], list) or not entry["history"]:
+                    raise ValueError("Invalid provenance history")
+                for step in entry["history"]:
+                    if (
+                        not isinstance(step, dict)
+                        or "raw" not in step
+                        or not isinstance(step.get("origin"), dict)
+                        or step.get("operation") not in ("define", "generated", "compose-list")
+                        or step.get("state") not in ("overridden", "effective", "contributes")
+                    ):
+                        raise ValueError("Invalid provenance history step")
+                    conditions = step.get("conditions", [])
+                    if not isinstance(conditions, list):
+                        raise ValueError("Invalid history conditions")
+                    for condition in conditions:
+                        if (
+                            not isinstance(condition, dict)
+                            or not isinstance(condition.get("expression"), str)
+                            or not isinstance(condition.get("origin"), dict)
+                        ):
+                            raise ValueError("Invalid history condition")
     return report
 
 
-def select(report, element=None, paths=(), follow=True):
+def select(report, element=None, paths=(), follow=True, history=False):
     for path in paths:
         if not path.startswith("/") or re.search(r"~(?![01])", path):
             raise ValueError("Expected an RFC 6901 pointer starting with /")
@@ -99,6 +126,8 @@ def select(report, element=None, paths=(), follow=True):
     }
     matched = set()
     for data in elements:
+        if history and not data.get("history_available"):
+            raise ValueError("History unavailable in this report; capture it with bst show --provenance --history")
         by_path = {entry["path"]: entry for entry in data["entries"]}
         selected = set()
         for query in paths:
@@ -120,10 +149,15 @@ def select(report, element=None, paths=(), follow=True):
                 elif ref not in selected:
                     selected.add(ref)
                     pending.append(ref)
+        if history and any("history" not in by_path[p] for p in selected):
+            raise ValueError("Selected entries lack captured history; use bst show --provenance --history")
         result["elements"].append(
             {
                 **data,
-                "entries": [dict(by_path[p], selected=p in requested) for p in sorted(selected)],
+                "entries": [
+                    dict({k: v for k, v in by_path[p].items() if history or k != "history"}, selected=p in requested)
+                    for p in sorted(selected)
+                ],
                 "unavailable_references": unavailable,
             }
         )
@@ -154,6 +188,27 @@ def render_origin(report):
                 lines.append("    resolved value unavailable")
             if entry["references"]:
                 lines.append("    references: " + ", ".join(r["path"] for r in entry["references"]))
+            steps = entry.get("history", [])
+            if len(steps) > 1 or any(step.get("conditions") for step in steps):
+                lines.append("    history:")
+                for step in steps:
+                    source = step["origin"]
+                    where = (
+                        "synthetic/generated"
+                        if source.get("synthetic")
+                        else f"{source.get('file')}:{source.get('line')}:{source.get('column')}"
+                    )
+                    conditions = ", ".join(c["expression"] for c in step.get("conditions", []))
+                    label = step["state"] + ("; " + step["operation"] if step["operation"] != "define" else "")
+                    lines.append(
+                        "      "
+                        + label
+                        + ": "
+                        + json.dumps(step["raw"], ensure_ascii=True)
+                        + " @ "
+                        + where
+                        + (" [if " + conditions + "]" if conditions else "")
+                    )
         for note in element.get("notes", []):
             lines.append("  " + note)
         if element["unavailable_references"]:
@@ -175,7 +230,15 @@ def run_origin(args):
             try:
                 text = runner(
                     command_base(args.directory, args.option)
-                    + ["show", "--deps", "none", "--provenance", "--", args.element]
+                    + [
+                        "show",
+                        "--deps",
+                        "none",
+                        "--provenance",
+                        *(["--history"] if args.history else []),
+                        "--",
+                        args.element,
+                    ]
                 ).stdout
             except ValueError as error:
                 raise ValueError(
@@ -183,7 +246,11 @@ def run_origin(args):
                 ) from error
             report = json.loads(text)
         report = select(
-            validate_report(report), args.element if args.from_report else None, args.path, not args.no_follow
+            validate_report(report),
+            args.element if args.from_report else None,
+            args.path,
+            not args.no_follow,
+            args.history,
         )
         print(
             json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2)

@@ -101,6 +101,7 @@ class Context:
 
         # Capture unexpanded winning input nodes only for explicit provenance queries.
         self._capture_input_provenance: bool = False
+        self._input_composition_history = None
 
         # Whether we are going to build, this is required for some conditional
         # functionality to take place only in the case that we are building.

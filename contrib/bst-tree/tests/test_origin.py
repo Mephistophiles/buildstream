@@ -77,6 +77,39 @@ def test_report_validation_and_missing_reference():
         select(data, element="missing")
 
 
+def test_history_is_explicit_and_saved_reports_keep_definition_evidence(tmp_path, capsys):
+    data = report()
+    entry = data["elements"][0]["entries"][2]
+    entry["history"] = [
+        {
+            "raw": "-O2",
+            "origin": {"file": "project.conf", "line": 3, "column": 2},
+            "operation": "define",
+            "state": "overridden",
+        },
+        {
+            "raw": "-O3",
+            "origin": entry["origin"],
+            "operation": "define",
+            "state": "effective",
+            "conditions": [{"expression": "debug", "origin": entry["origin"]}],
+        },
+    ]
+    data["elements"][0]["history_available"] = True
+    path = tmp_path / "history.json"
+    path.write_text(json.dumps(data))
+    args = ["origin", "--from-report", str(path), "--path", "/vars/optimization"]
+    assert main([*args, "--history"]) == 0
+    text = capsys.readouterr().out
+    assert "overridden" in text and "effective" in text and "[if debug]" in text and "project.conf:3:2" in text
+    assert main([*args, "--format", "json"]) == 0
+    assert "history" not in json.loads(capsys.readouterr().out)["elements"][0]["entries"][0]
+    data["elements"][0].pop("history_available")
+    path.write_text(json.dumps(data))
+    assert main([*args, "--history"]) == 2
+    assert "History unavailable" in capsys.readouterr().err
+
+
 def test_backend_requires_fork_and_does_not_guess(monkeypatch, capsys):
     from bst_tools_core.process import Execution
 

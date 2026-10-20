@@ -537,6 +537,8 @@ For binary growth attribution, use [bst-diff --bloaty](../bst-diff/README.md).
 bst-tree origin app.bst -C /project --path /env/CFLAGS
 bst-tree origin app.bst -C /project --path /config/build-commands --format json
 bst-tree origin app.bst -C /project --option debug True --path /vars/flags
+bst-tree origin app.bst -C /project --history --path /env/CFLAGS
+bst-tree origin app.bst -C /project --history --path /config/build-commands --format json
 bst show --deps none --provenance app.bst > origins.json
 bst-tree origin --from-report origins.json --path /env/CFLAGS --format json
 ```
@@ -570,9 +572,41 @@ file/line/column; unavailable resolved values are explicitly marked. Reports
 include effective environment/configuration values and should be handled like the
 project's other configuration dumps.
 
-The evidence describes **winning composed values**, not a full history of every
-assignment: overwritten definitions and inactive conditional branches are not
-reconstructed. Raw values preserve pre-variable-expansion content after YAML
+The default view describes **winning composed values**. Add `--history` to
+capture actual applied definition lineage in the native YAML composition engine:
+project/plugin defaults, includes, element overrides and applied conditional
+fragments keep their source file, 1-based line and column. Scalar steps are marked
+`overridden` or `effective`. List containers also appear as entries: their history
+records ordinary list replacements and explicit `(=)`, `(<)` and `(>)` directives;
+steps still contributing to a final list are marked `contributes`. Applied
+conditions carry their expression and the condition's own YAML location.
+
+History is opt-in and starts before configuration/project loading. Normal loads
+retain no history or node references. It requires **rebuilding this fork's native
+`node` extension**, in addition to updating its Python modules; updating bst-tree
+or copying only the Python files is insufficient. Ordinary winner-only queries
+remain available without requesting history. Generated scalar assignments are
+explicitly synthetic, even where BuildStream internally inherits old coordinates.
+
+```sh
+bst show --deps none --provenance --history app.bst > history.json
+bst-tree origin --from-report history.json --history --path /env/CFLAGS
+```
+
+History reports add `history_available: true` and per-entry `history` arrays with
+raw definitions/directives, origins, operation, state and optional applied
+conditions. `--history --from-report` fails explicitly if the requested history
+was not captured. Without `--history`, the wrapper omits the extra history fields
+and keeps its compact view. Old definitions are shown as raw inputs, not as
+hypothetical resolved values; reference following uses the effective definition.
+
+Definition precedence is not a build-execution trace or a reconstruction of every
+assignment: inactive branches are not applied, and direct plugin/internal
+mutations outside the observed composition/generated-assignment operations are
+not reconstructed. Values removed entirely from the effective configuration have
+no selected winning path in this report.
+
+Raw values preserve pre-variable-expansion content after YAML
 composition, not source quoting or original file formatting. Variable links are
 expansion evidence, not proof that a compiler executed those flags, nor a trace
 of transformations inside element plugins. Project includes may require junction
@@ -582,7 +616,8 @@ integration commands are requested by the provenance query.
 All output is headless text or JSON. Normal success exits 0; invalid inputs,
 unsupported backends and unavailable referenced evidence exit 2, interruption 130.
 The existing per-command timeout and output bounds apply. Native backend tests
-cover composed includes, overrides, conditional options, references and unchanged
+compile the real node extension and cover composed includes, overrides, conditional
+options, list directives, generated assignments, references, observer cleanup and unchanged
 ordinary `bst show`; CI tests the fork's pure Python changes against the released
 BuildStream compiled runtime on Python 3.10/3.14.
 

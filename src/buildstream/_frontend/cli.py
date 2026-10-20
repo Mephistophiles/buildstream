@@ -588,9 +588,12 @@ def build(
     is_flag=True,
     help="Emit JSON winning input locations and variable references; incompatible with --format",
 )
+@click.option(
+    "--history", is_flag=True, help="Include applied YAML override/list composition history; requires --provenance"
+)
 @click.argument("elements", nargs=-1, type=click.Path(readable=False))
 @click.pass_obj
-def show(app, elements, deps, except_, order, format_, provenance):
+def show(app, elements, deps, except_, order, format_, provenance, history):
     """Show elements in the pipeline
 
     Specifying no elements will result in showing the default targets
@@ -612,8 +615,9 @@ def show(app, elements, deps, except_, order, format_, provenance):
         all:   All dependencies
 
     ``--provenance`` emits versioned JSON with winning composed input locations
-    and variable references. It does not reconstruct overwritten definitions or
-    inactive branches and cannot be combined with ``--format``.
+    and variable references. Add ``--history`` to observe applied YAML overrides
+    and list composition. Inactive branches are not applied. Provenance output
+    cannot be combined with ``--format``.
 
     **FORMAT**
 
@@ -653,9 +657,16 @@ def show(app, elements, deps, except_, order, format_, provenance):
         bst show target.bst --format \\
             $'---------- %{name} ----------\\n%{vars}'
     """
+    if history and not provenance:
+        raise click.UsageError("--history requires --provenance")
+    if history:
+        from .. import node
+
+        if not hasattr(node, "_set_composition_observer"):
+            raise click.UsageError("--history requires this fork's rebuilt native node extension")
     if provenance and format_ is not None:
         raise click.UsageError("--provenance cannot be combined with --format")
-    with app.initialized(capture_input_provenance=provenance):
+    with app.initialized(capture_input_provenance=provenance, capture_input_history=history):
         if provenance:
             if not elements:
                 elements = app.stream.get_default_targets()

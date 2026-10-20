@@ -164,16 +164,20 @@ class App:
     # the session header and summary, and time the main session from startup time.
     #
     @contextmanager
-    def initialized(self, *, session_name=None, capture_input_provenance=False):
+    def initialized(self, *, session_name=None, capture_input_provenance=False, capture_input_history=False):
         directory = self._main_options["directory"]
         config = self._main_options["config"]
 
         self._session_name = session_name
 
+        # Capture composition before loading user/project/plugin configuration.
+        from .._composition_history import capture_history
+
         # Instantiate Context
-        with Context() as context:
+        with capture_history(capture_input_history) as history, Context() as context:
             self.context = context
             context._capture_input_provenance = capture_input_provenance
+            context._input_composition_history = history
 
             #
             # Load the configuration
