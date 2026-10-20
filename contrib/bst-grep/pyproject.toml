@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bst-grep"
+version = "0.1.0"
+description = "Search BuildStream sources and resolved configuration with element provenance"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["ruamel.yaml>=0.16.7"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+bst-grep = "bst_grep.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
