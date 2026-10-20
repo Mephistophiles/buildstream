@@ -14,8 +14,8 @@ jobs:
         python: ['3.10', '3.14']
     steps:
       - uses: actions/checkout@v7
-      - name: Install BuildStream sandbox helper
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Install sandbox helper and artifact analyzers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap abigail-tools diffoscope-minimal gcc
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
@@ -23,3 +23,4 @@ jobs:
       - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests
         env:
           BST_TREE_TEST_LIVE: "1"
+          BST_TREE_TEST_TOOLS: "1"

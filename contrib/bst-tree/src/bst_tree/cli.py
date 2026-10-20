@@ -107,6 +107,8 @@ def parser():
         help="Only compare nodes, dependencies, dependency types and targets",
     )
     diff.add_argument("--check", action="store_true", help="Exit 1 when the selected comparison has changes")
+    from .artifact_cli import configure_parser
+    configure_parser(commands)
     return result
 
 
@@ -148,6 +150,9 @@ def main(argv=None):
     arguments = parser()
     args = arguments.parse_args(argv)
     try:
+        if args.command == "artifact-diff":
+            from .artifact_cli import run_artifact_diff
+            return run_artifact_diff(args)
         if args.command == "diff":
             old, new = read_snapshot(args.old), read_snapshot(args.new)
             fields = set(DIFF_FIELDS)
