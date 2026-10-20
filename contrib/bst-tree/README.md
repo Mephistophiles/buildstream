@@ -583,3 +583,46 @@ and `--output-limit BYTES` (default 32 MiB per captured stream). Overflow is an
 error rather than a silently partial graph or inspection. Cancellation and timeout
 terminate the owned subprocess group. These limits do not cap the size of a saved
 graph read from disk or stdin, or the number of source files listed locally.
+
+## Artifact size and binary growth
+
+```sh
+bst-tree size product.bst sdk.bst -C /project --scope run --format json
+bst-tree size product.bst -C /project --check-max 100000000
+bst-tree size --archive app.bst app.tar --archive runtime.bst runtime.tar
+bst-tree size --snapshot graph.json --archive app.bst app.tar --archive runtime.bst runtime.tar
+bst-tree artifact-diff old.tar new.tar --archives --bloaty --path usr/lib/libapp.so
+bst-tree artifact-diff old.tar new.tar --archives --bloaty --bloaty-sources sections,compileunits --format json
+```
+
+`size` reads each selected artifact once, hashing regular contents in a temporary
+checkout tar without integration or builds. Live checkout may retrieve missing
+data from configured artifact remotes; no CAS index is read or maintained.
+`--scope` defaults to `run` and matches the graph browser, retaining roots in build
+scope. Offline archives can be independent roots, or associated with exact element
+names in a saved graph. Missing archives/failed exports are explicitly incomplete;
+unknown totals are null, with separate `known_file_bytes` partial counts.
+
+Each element reports its own logical regular/hardlink file bytes and the closure
+inside the selected visible graph. Shared dependency elements are counted once
+per closure and once in the total. For each requested root, `exclusive` excludes
+elements also reachable from another requested root. `content_unique_bytes`
+deduplicates full-file SHA-256 content, including identical files in different
+artifacts. This is not CAS-chunk/compression usage, reclaimable disk space, the
+size of an integrated/staged rootfs, or filesystem block usage. Directories,
+symlink bodies and archive headers are excluded. These distinctions also appear
+in the versioned JSON report. `--check-max BYTES` exits 1 only for a complete total
+above the budget; incomplete/error exits 2. Normal success exits 0.
+
+`artifact-diff --bloaty` profiles changed paired ELF files, or explicit selected
+ELF pairs. Install the optional `bloaty` executable on PATH. Text, JSON and TUI
+reports use the same analyzer; in the artifact TUI press **b** for Bloaty. The
+report compares new against old, with at most 30 rows per level, and distinguishes
+file size from ELF VM size (which is not process RSS). `--bloaty-sources` accepts
+comma-separated `sections`, `symbols`, `segments` and `compileunits`; defaults to
+`sections,symbols`. Symbol/compile-unit attribution depends on symbols/debug info
+available in the selected binary; separate debug files are not automatically
+extracted. Bloaty exit 0 means `analyzed`, not that sizes are unchanged; nonzero,
+missing executables and timeouts are errors. Inventory hashes and `--check` remain
+the authoritative selected-file change check. Existing timeout/cancellation and
+captured-output bounds apply; no target binary is executed.

@@ -49,6 +49,7 @@ class ArtifactDiffApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("a", "abidiff", "ABI"),
+        ("b", "bloaty", "Size"),
         ("d", "diffoscope", "File detail"),
         Binding("D", "diffoscope_all", "Artifact detail", key_display="Shift+D"),
         ("slash", "search", "Search"),
@@ -149,12 +150,14 @@ class ArtifactDiffApp(App):
     def check_action(self, action, parameters):
         if isinstance(self.focused, Input) and action != "back":
             return False
-        if action in ("abidiff", "diffoscope", "diffoscope_all"):
+        if action in ("abidiff", "diffoscope", "bloaty", "diffoscope_all"):
             if not self.ready or self.busy:
                 return False
             if action == "diffoscope_all":
                 return True
-            return bool(self.selected_path and self.session.pair(self.selected_path, elf=action == "abidiff"))
+            return bool(
+                self.selected_path and self.session.pair(self.selected_path, elf=action in ("abidiff", "bloaty"))
+            )
         return super().check_action(action, parameters)
 
     def populate(self):
@@ -209,7 +212,7 @@ class ArtifactDiffApp(App):
         options = [("Overview", "overview")]
         if self.selected_path is not None:
             options += [("Text diff", "text"), ("Metadata / hashes", "metadata")]
-            for tool in ("abidiff", "diffoscope"):
+            for tool in ("abidiff", "diffoscope", "bloaty"):
                 if (tool, self.selected_path) in self.session.analyses:
                     options.append((tool + " report", tool))
         if ("diffoscope", None) in self.session.analyses:
@@ -237,10 +240,10 @@ class ArtifactDiffApp(App):
             )
         lines.append("")
         if self.session.pair(record["path"], elf=True):
-            lines.append("ELF pair · press a to run abidiff. No ABI conclusion until analysis completes.")
+            lines.append("ELF pair · a: abidiff; b: Bloaty size profile. No ABI conclusion until analysis completes.")
         if self.session.pair(record["path"]):
             lines.append("Press d for diffoscope file detail; Shift+D compares the whole artifacts.")
-        for tool in ("abidiff", "diffoscope"):
+        for tool in ("abidiff", "diffoscope", "bloaty"):
             result = self.session.analyses.get((tool, record["path"]))
             if result:
                 lines.append(tool + ": " + result["status"] + " · f opens the report")
@@ -264,7 +267,7 @@ class ArtifactDiffApp(App):
         log.clear()
         section = self.query_one(Select).value
         record = self.records.get(self.selected_path)
-        if section in ("abidiff", "diffoscope", "whole"):
+        if section in ("abidiff", "diffoscope", "bloaty", "whole"):
             key = ("diffoscope", None) if section == "whole" else (section, self.selected_path)
             result = self.session.analyses.get(key)
             if result:
@@ -346,6 +349,9 @@ class ArtifactDiffApp(App):
 
     def action_abidiff(self):
         self.run_worker(self.analyze("abidiff", self.selected_path))
+
+    def action_bloaty(self):
+        self.run_worker(self.analyze("bloaty", self.selected_path))
 
     def action_diffoscope(self):
         self.run_worker(self.analyze("diffoscope", self.selected_path))

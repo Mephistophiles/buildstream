@@ -45,7 +45,10 @@ class Runner:
 
     def __call__(self, args, **kwargs):
         self.calls.append(args)
-        return Execution(4 if Path(args[0]).name == "abidiff" else 1, "detailed differences")
+        return Execution(
+            4 if Path(args[0]).name == "abidiff" else 0 if Path(args[0]).name == "bloaty" else 1,
+            "detailed differences",
+        )
 
     def cancel(self):
         pass
@@ -75,6 +78,11 @@ async def test_artifact_tui_analysis_navigation_search_and_cleanup(tmp_path, mon
         await pilot.pause()
         assert app.query_one(Select).value == "abidiff"
         assert session.analyses["abidiff", "lib/lib[1].so"]["status"] == "changed"
+        await pilot.press("b")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.query_one(Select).value == "bloaty"
+        assert session.analyses["bloaty", "lib/lib[1].so"]["status"] == "analyzed"
         await pilot.press("/")
         await pilot.press("q")
         assert app.query_one(Input).value == "q" and app.is_running
@@ -88,7 +96,7 @@ async def test_artifact_tui_analysis_navigation_search_and_cleanup(tmp_path, mon
         assert ("diffoscope", None) in session.analyses
         await pilot.press("q")
     assert not session.root.exists()
-    assert len(runner.calls) == 3
+    assert len(runner.calls) == 4
 
 
 async def test_artifact_tui_missing_analyzer_is_retryable(tmp_path, monkeypatch):

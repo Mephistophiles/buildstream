@@ -287,5 +287,8 @@ def test_live_artifact_comparison(tmp_path, monkeypatch, capsys):
         )
         artifact = json.loads(capsys.readouterr().out)
         assert artifact["preview"]["text"] == "new\n" and artifact["pulled"] is False
+        assert main(["size", "import.bst", "-C", str(project), "--format", "json"]) == 0
+        sizes = json.loads(capsys.readouterr().out)
+        assert sizes["coverage"]["complete"] and sizes["total"]["file_bytes"] == 13
     finally:
         inspector.cancel()

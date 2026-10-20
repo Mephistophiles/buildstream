@@ -66,6 +66,14 @@ def configure_parser(commands):
         "--abidiff", action="store_true", help="Analyze changed paired ELF files, or explicit --path ELF pairs"
     )
     sub.add_argument(
+        "--bloaty", action="store_true", help="Profile size changes in changed paired ELF files with Bloaty"
+    )
+    sub.add_argument(
+        "--bloaty-sources",
+        default="sections,symbols",
+        help="Bloaty sources: comma-separated sections,symbols,segments,compileunits",
+    )
+    sub.add_argument(
         "--diffoscope", action="store_true", help="Analyze both archives, or paired regular files selected with --path"
     )
     sub.add_argument(
@@ -136,6 +144,13 @@ def run_artifact_diff(args):
         raise ValueError("--diffoscope-html requires at most one --path")
     if args.format == "tui" and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         raise ValueError("artifact comparison TUI requires a terminal (TTY); use --format text or json")
+    if not args.bloaty_sources or set(args.bloaty_sources.split(",")) - {
+        "sections",
+        "symbols",
+        "segments",
+        "compileunits",
+    }:
+        raise ValueError("Unsupported --bloaty-sources")
     paths = list(dict.fromkeys(archive_name(p) for p in args.path))
     session = ArtifactComparison(
         args.old,
@@ -150,6 +165,7 @@ def run_artifact_diff(args):
         debug_old=args.debug_info_dir_old,
         debug_new=args.debug_info_dir_new,
         suppressions=args.abidiff_suppression,
+        bloaty_sources=args.bloaty_sources,
     )
 
     def load(progress=lambda text: None):
@@ -164,6 +180,11 @@ def run_artifact_diff(args):
                 if session.pair(path, elf=True):
                     progress("Running abidiff: " + path)
                     session.analyze("abidiff", path)
+        if args.bloaty:
+            for path in paths or session.report()["elf_pairs"]:
+                if session.pair(path, elf=True):
+                    progress("Running Bloaty: " + path)
+                    session.analyze("bloaty", path)
         if args.diffoscope or args.diffoscope_html:
             for path in paths or [None]:
                 progress("Running diffoscope: " + (path or "whole artifact"))
@@ -185,6 +206,8 @@ def run_artifact_diff(args):
         report["requested_analyses"] = (["abidiff"] if args.abidiff else []) + (
             ["diffoscope"] if args.diffoscope or args.diffoscope_html else []
         )
+        if args.bloaty:
+            report["requested_analyses"].append("bloaty")
         if args.format != "tui":
             if paths:
                 report["text_diffs"] = {path: session.text_diff(path) for path in paths}

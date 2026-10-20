@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_real_artifact_analyzers(tmp_path):
     # Opting in must fail if an analyzer disappears from CI, rather than skip.
-    for tool in ("gcc", "abidiff", "diffoscope"):
+    for tool in ("gcc", "abidiff", "diffoscope", "bloaty"):
         assert shutil.which(tool), f"Required integration-test executable missing: {tool}"
     archives = []
     for side, symbol in (("old", "removed_function"), ("new", "added_function")):
@@ -58,6 +58,9 @@ def test_real_artifact_analyzers(tmp_path):
         assert text["exit_code"] == 1
         assert "old" in text["stdout"] and "new" in text["stdout"]
         assert "<html" in (tmp_path / "report.html").read_text().lower()
+        size = session.analyze("bloaty", "usr/lib/library.so")
+        assert size["status"] == "analyzed", size
+        assert "FILE SIZE" in size["stdout"] and "TOTAL" in size["stdout"]
         whole = session.analyze("diffoscope")
         assert whole["status"] == "changed", whole
         assert "config" in whole["stdout"]

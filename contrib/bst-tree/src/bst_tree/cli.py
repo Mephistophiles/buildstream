@@ -111,6 +111,8 @@ def parser():
     configure_parser(commands)
     from .headless import configure_parser as configure_headless
     result.headless_parsers = configure_headless(commands)
+    from .size import configure_parser as configure_size
+    result.headless_parsers["size"] = configure_size(commands)
     return result
 
 
@@ -158,6 +160,9 @@ def main(argv=None):
     else:
         args = arguments.parse_args(values)
     try:
+        if args.command == "size":
+            from .size import run_size
+            return run_size(args)
         if args.command in ("tree", "rdeps", "paths"):
             from .headless import run_graph_query
             return run_graph_query(args)

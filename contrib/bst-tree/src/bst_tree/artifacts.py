@@ -242,6 +242,7 @@ class ArtifactComparison:
         debug_old=(),
         debug_new=(),
         suppressions=(),
+        bloaty_sources="sections,symbols",
         runner=None,
     ):
         self.inputs = old, new
@@ -251,6 +252,7 @@ class ArtifactComparison:
         self.timeout, self.report_limit = timeout, report_limit
         self.debug = tuple(debug_old), tuple(debug_new)
         self.suppressions = tuple(suppressions)
+        self.bloaty_sources = bloaty_sources
         self.cancelled = threading.Event()
         self.runner = runner or CommandRunner(self.cancelled)
         self.serial = threading.Lock()
@@ -396,14 +398,14 @@ class ArtifactComparison:
 
     def analyze(self, tool, path=None, *, html=None):
         with self.operation():
-            if tool not in ("abidiff", "diffoscope"):
+            if tool not in ("abidiff", "diffoscope", "bloaty"):
                 raise ValueError("Unknown analyzer: " + tool)
             if not self.loaded:
                 raise ValueError("Load artifacts before analyzing files")
             if path is not None:
                 path = archive_name(path)
-            if tool == "abidiff" and (path is None or not self.pair(path, elf=True)):
-                raise ValueError("abidiff requires a regular ELF file on both sides")
+            if tool in ("abidiff", "bloaty") and (path is None or not self.pair(path, elf=True)):
+                raise ValueError(tool + " requires a regular ELF file on both sides")
             if path is not None and not self.pair(path):
                 raise ValueError("Selected-file analysis requires a regular file on both sides")
             result = {
@@ -417,7 +419,11 @@ class ArtifactComparison:
                 "note": (
                     ABI_NOTE
                     if tool == "abidiff"
-                    else "diffoscope detail depends on installed comparators; report limits apply."
+                    else (
+                        "Bloaty size attribution depends on available symbols/debug info; VM size is not RSS. Exit 0 means analyzed, not unchanged."
+                        if tool == "bloaty"
+                        else "diffoscope detail depends on installed comparators; report limits apply."
+                    )
                 ),
             }
             executable = shutil.which(tool)
@@ -434,7 +440,9 @@ class ArtifactComparison:
                     inputs = [
                         a.materialize(path, self.root / side) for a, side in zip(self.archives, ("before", "after"))
                     ]
-                if tool == "abidiff":
+                if tool == "bloaty":
+                    args = [executable, "-d", self.bloaty_sources, "-n", "30", str(inputs[1]), "--", str(inputs[0])]
+                elif tool == "abidiff":
                     args = [executable, "--no-default-suppression"]
                     for side, dirs in enumerate(self.debug, 1):
                         for directory in dirs:
@@ -458,11 +466,14 @@ class ArtifactComparison:
                     ]
                     if html:
                         args += ["--html", str(self.root / "diffoscope.html"), "--output-empty"]
-                args += [str(p) for p in inputs]
+                if tool != "bloaty":
+                    args += [str(p) for p in inputs]
                 execution = self.runner(args, timeout=self.timeout, limit=self.report_limit)
                 code = execution.returncode
                 if execution.timed_out:
                     status = "timeout"
+                elif tool == "bloaty":
+                    status = "analyzed" if code == 0 else "error"
                 elif tool == "abidiff":
                     status = (
                         "error"

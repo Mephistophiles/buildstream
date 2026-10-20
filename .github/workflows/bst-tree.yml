@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install sandbox helper and artifact analyzers
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap abigail-tools diffoscope-minimal gcc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap abigail-tools diffoscope-minimal gcc bloaty
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
