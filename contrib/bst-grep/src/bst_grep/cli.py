@@ -215,6 +215,10 @@ def run(args, output):
                             matched_files.add((name, record["path"]))
                         output.emit(record)
             searched += 1
+        except BrokenPipeError:
+            # A consumer such as head has finished; stop the whole search rather
+            # than reporting an element error and checking out further sources.
+            raise
         except (OSError, ValueError) as error:
             failed += 1
             output.emit({"type": "error", "element": name, "message": str(error)})

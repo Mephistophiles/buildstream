@@ -178,3 +178,16 @@ def test_context_precedence_and_leading_dash():
 def test_color_highlights_only_match_bytes():
     record = {"text": "ж needle tail", "submatches": [{"start": 3, "end": 9}]}
     assert cli.highlight(record) == "ж \033[1;31mneedle\033[0m tail"
+
+
+@pytest.mark.skipif(shutil.which("rg") is None, reason="Install ripgrep")
+def test_closed_output_stops_search_instead_of_becoming_an_element_failure(project):
+    class ClosedConsumer:
+        def emit(self, record):
+            assert record["type"] == "match", "a closed pipe must not become an error event"
+            raise BrokenPipeError()
+
+    args = cli.parser().parse_args(["needle", "app.bst"])
+    args.before_context = args.after_context = 0
+    with pytest.raises(BrokenPipeError):
+        cli.run(args, ClosedConsumer())

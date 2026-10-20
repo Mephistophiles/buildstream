@@ -99,7 +99,10 @@ def test_live_junction_paths_and_patched_sources(project, capsys):
     subproject = project / "subproject"
     elements = subproject / "elements" / "dir"
     elements.mkdir(parents=True)
-    (subproject / "project.conf").write_text("name: sub\nmin-version: '2.0'\nelement-path: elements\n")
+    (subproject / "project.conf").write_text(
+        "name: sub\nmin-version: '2.0'\nelement-path: elements\n"
+        "plugins:\n- origin: pip\n  package-name: buildstream-plugins\n  sources:\n  - patch\n"
+    )
     (subproject / "code").mkdir()
     (subproject / "code" / "main.c").write_text("old_needle\n")
     (subproject / "change.patch").write_text("--- a/main.c\n+++ b/main.c\n@@ -1 +1 @@\n-old_needle\n+patched_needle\n")

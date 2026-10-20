@@ -13,6 +13,7 @@ dependencies = ["ruamel.yaml>=0.16.7"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+live = ["BuildStream>=2.8", "buildstream-plugins>=2"]
 
 [project.scripts]
 bst-grep = "bst_grep.cli:main"

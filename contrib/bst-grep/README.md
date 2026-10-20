@@ -163,7 +163,10 @@ each tree is searched; only one element checkout is retained at a time.
 python -m pip install -e './contrib/bst-grep[test]'
 python -m pytest -c contrib/bst-grep/pyproject.toml contrib/bst-grep/tests
 
-# Requires a working bst/buildbox-casd, ripgrep, and permission to create sockets.
+# Install the real BuildStream and patch source plugin used by the live fixtures.
+python -m pip install -e './contrib/bst-grep[test,live]'
+# Requires working bst/buildbox-casd, ripgrep, patch, bubblewrap on Linux,
+# and permission to create sockets.
 BST_GREP_TEST_LIVE=1 python -m pytest -c contrib/bst-grep/pyproject.toml contrib/bst-grep/tests
 ```
 
