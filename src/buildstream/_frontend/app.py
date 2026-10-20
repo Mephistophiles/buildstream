@@ -164,7 +164,7 @@ class App:
     # the session header and summary, and time the main session from startup time.
     #
     @contextmanager
-    def initialized(self, *, session_name=None):
+    def initialized(self, *, session_name=None, capture_input_provenance=False):
         directory = self._main_options["directory"]
         config = self._main_options["config"]
 
@@ -173,6 +173,7 @@ class App:
         # Instantiate Context
         with Context() as context:
             self.context = context
+            context._capture_input_provenance = capture_input_provenance
 
             #
             # Load the configuration

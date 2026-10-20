@@ -2923,6 +2923,20 @@ class Element(Plugin):
             with sandbox:
                 yield sandbox
 
+    def _get_input_provenance(self):
+        from ._input_provenance import build_report
+
+        return build_report(
+            self._get_full_name(),
+            self.__input_provenance_nodes,
+            {
+                "vars": dict(self.__variables),
+                "env": self.__environment,
+                "config": self.__config.strip_node_info(),
+                "public": self.__public.strip_node_info(),
+            },
+        )
+
     # __initialize_from_yaml()
     #
     # Normal element initialization procedure.
@@ -2939,11 +2953,15 @@ class Element(Plugin):
         variables = self.__extract_variables(project, load_element)
         variables["element-name"] = self.name
         self.__variables = Variables(variables)
+        if context._capture_input_provenance:
+            self.__input_provenance_nodes = {"vars": variables.clone()}
         if not load_element.first_pass:
             self.__variables.check()
 
         # Collect the composited environment now that we have variables
         unexpanded_env = self.__extract_environment(project, load_element)
+        if context._capture_input_provenance:
+            self.__input_provenance_nodes["env"] = unexpanded_env.clone()
         self.__variables.expand(unexpanded_env)
         self.__environment = unexpanded_env.strip_node_info()
 
@@ -2953,11 +2971,15 @@ class Element(Plugin):
 
         # Grab public domain data declared for this instance
         self.__public = self.__extract_public(load_element)
+        if context._capture_input_provenance:
+            self.__input_provenance_nodes["public"] = self.__public.clone()
         self.__variables.expand(self.__public)
 
         # Collect the composited element configuration and
         # ask the element to configure itself.
         self.__config = self.__extract_config(load_element)
+        if context._capture_input_provenance:
+            self.__input_provenance_nodes["config"] = self.__config.clone()
         self.__variables.expand(self.__config)
 
         self._configure(self.__config)

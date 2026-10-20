@@ -15,7 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install sandbox helper and artifact analyzers
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap abigail-tools diffoscope-minimal gcc bloaty
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap abigail-tools diffoscope-minimal gcc cmake ninja-build pkg-config libre2-dev libcapstone-dev libprotobuf-dev protobuf-compiler
+      - name: Build pinned Bloaty 1.1 (not packaged by Ubuntu noble)
+        run: |
+          git clone https://github.com/google/bloaty.git "$RUNNER_TEMP/bloaty"
+          git -C "$RUNNER_TEMP/bloaty" checkout 87082741b1cc0a97cd84bd17cd4ee41d70a42fc6
+          git -C "$RUNNER_TEMP/bloaty" submodule update --init --recursive
+          CXXFLAGS=-std=c++17 cmake -S "$RUNNER_TEMP/bloaty" -B "$RUNNER_TEMP/bloaty-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build "$RUNNER_TEMP/bloaty-build" --target bloaty --parallel 2
+          echo "$RUNNER_TEMP/bloaty-build" >> "$GITHUB_PATH"
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'

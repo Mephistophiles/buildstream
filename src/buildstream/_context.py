@@ -99,6 +99,9 @@ class Context:
         # completion where casd is not required
         self.use_casd: bool = use_casd
 
+        # Capture unexpanded winning input nodes only for explicit provenance queries.
+        self._capture_input_provenance: bool = False
+
         # Whether we are going to build, this is required for some conditional
         # functionality to take place only in the case that we are building.
         self.build: bool = False

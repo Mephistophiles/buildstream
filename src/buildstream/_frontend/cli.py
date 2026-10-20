@@ -11,6 +11,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import json
 import os
 import re
 import sys
@@ -582,9 +583,14 @@ def build(
     type=click.STRING,
     help="Format string for each element",
 )
+@click.option(
+    "--provenance",
+    is_flag=True,
+    help="Emit JSON winning input locations and variable references; incompatible with --format",
+)
 @click.argument("elements", nargs=-1, type=click.Path(readable=False))
 @click.pass_obj
-def show(app, elements, deps, except_, order, format_):
+def show(app, elements, deps, except_, order, format_, provenance):
     """Show elements in the pipeline
 
     Specifying no elements will result in showing the default targets
@@ -604,6 +610,10 @@ def show(app, elements, deps, except_, order, format_):
         run:   Runtime dependencies, including the element itself
         build: Build time dependencies, excluding the element itself
         all:   All dependencies
+
+    ``--provenance`` emits versioned JSON with winning composed input locations
+    and variable references. It does not reconstruct overwritten definitions or
+    inactive branches and cannot be combined with ``--format``.
 
     **FORMAT**
 
@@ -643,7 +653,24 @@ def show(app, elements, deps, except_, order, format_):
         bst show target.bst --format \\
             $'---------- %{name} ----------\\n%{vars}'
     """
-    with app.initialized():
+    if provenance and format_ is not None:
+        raise click.UsageError("--provenance cannot be combined with --format")
+    with app.initialized(capture_input_provenance=provenance):
+        if provenance:
+            if not elements:
+                elements = app.stream.get_default_targets()
+            dependencies = app.stream.load_selection(
+                elements, selection=deps, except_targets=except_, need_state=False
+            )
+            if order == "alpha":
+                dependencies = sorted(dependencies)
+            report = {
+                "format_version": 1,
+                "query": "input-provenance",
+                "elements": [element._get_input_provenance() for element in dependencies],
+            }
+            click.echo(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+            return
 
         if not format_:
             format_ = app.context.log_element_format

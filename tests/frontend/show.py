@@ -881,3 +881,27 @@ def test_multi_source_info(cli, datafiles):
     assert source_info.get_str("version") == "1234567"
     assert source_info.get_str("version-guess", None) == "12"
     assert source_info.get_str("homepage") == "http://happy.ponyfarm.com"
+
+
+def test_show_input_provenance(cli, tmp_path):
+    import json
+
+    project = tmp_path / "provenance-project"
+    (project / "elements").mkdir(parents=True)
+    (project / "project.conf").write_text(
+        "name: provenance-test\nmin-version: '2.0'\nelement-path: elements\n"
+        "sandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+    )
+    (project / "flags.yml").write_text('variables:\n  flags: "-O3 -g"\nenvironment:\n  CFLAGS: "%{flags}"\n')
+    (project / "elements" / "app.bst").write_text(
+        "kind: manual\n(@): flags.yml\nconfig:\n  build-commands:\n  - echo %{flags}\n"
+    )
+    result = cli.run(project=str(project), args=["show", "--deps", "none", "--provenance", "app.bst"])
+    result.assert_success()
+    report = json.loads(result.output)
+    assert report["format_version"] == 1
+    entries = {entry["path"]: entry for entry in report["elements"][0]["entries"]}
+    assert entries["/env/CFLAGS"]["raw"] == "%{flags}"
+    assert entries["/env/CFLAGS"]["value"] == "-O3 -g"
+    assert entries["/env/CFLAGS"]["origin"]["file"].endswith("flags.yml")
+    assert entries["/env/CFLAGS"]["references"] == [{"variable": "flags", "path": "/vars/flags"}]

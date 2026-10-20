@@ -113,6 +113,8 @@ def parser():
     result.headless_parsers = configure_headless(commands)
     from .size import configure_parser as configure_size
     result.headless_parsers["size"] = configure_size(commands)
+    from .origin import configure_parser as configure_origin
+    result.headless_parsers["origin"] = configure_origin(commands)
     return result
 
 
@@ -160,6 +162,9 @@ def main(argv=None):
     else:
         args = arguments.parse_args(values)
     try:
+        if args.command == "origin":
+            from .origin import run_origin
+            return run_origin(args)
         if args.command == "size":
             from .size import run_size
             return run_size(args)

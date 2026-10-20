@@ -626,3 +626,59 @@ extracted. Bloaty exit 0 means `analyzed`, not that sizes are unchanged; nonzero
 missing executables and timeouts are errors. Inventory hashes and `--check` remain
 the authoritative selected-file change check. Existing timeout/cancellation and
 captured-output bounds apply; no target binary is executed.
+
+## Configuration provenance
+
+```sh
+# Requires the bst executable from this fork, including its provenance extension:
+bst-tree origin app.bst -C /project --path /env/CFLAGS
+bst-tree origin app.bst -C /project --path /config/build-commands --format json
+bst-tree origin app.bst -C /project --option debug True --path /vars/flags
+bst show --deps none --provenance app.bst > origins.json
+bst-tree origin --from-report origins.json --path /env/CFLAGS --format json
+```
+
+`origin` follows a value to its winning composed YAML location, then follows
+`%{variable}` references transitively through the variable definitions. Pointers
+use RFC 6901 escaping (`~1` for `/`, `~0` for `~`); a pointer can select a whole
+subtree such as `/config/build-commands`. Multiple `--path` options are supported.
+`--no-follow` shows only the selected entries; default selection includes all
+entries. `--from-report` works without BuildStream, and an optional element name
+selects one element from a multi-element report. It cannot be combined with live
+project arguments. Missing requested fields are errors rather than empty evidence.
+
+The fork's new `bst show --provenance` is the backend JSON interface. It supports
+normal dependency selection, ordering, exclusions, project options and junctions,
+and is incompatible with `--format`. It captures raw composed nodes only during
+explicit provenance queries, before variable expansion, so normal builds and
+existing `bst show` output do not pay the cloning cost. This is a small core
+extension because the ordinary resolved `bst show` YAML has already lost source
+locations; the frontend does not guess origins by searching `.bst` files. With an
+unextended bst executable, the command reports a clear unsupported-backend error.
+Install this fork as the environment's BuildStream (with normal BuildStream
+runtime/buildbox prerequisites); updating bst-tree alone does not update bst.
+
+Every report has `format_version: 1`, `query: "input-provenance"` and `elements`.
+Entries contain the RFC 6901 `path`, unexpanded composed `raw`, resolved `value`,
+`value_available`, `origin` (file, display, 1-based line/column, synthetic marker)
+and variable `references`. The wrapper adds requested paths, selection/evidence
+markers and any unavailable references. Generated/synthetic nodes have null
+file/line/column; unavailable resolved values are explicitly marked. Reports
+include effective environment/configuration values and should be handled like the
+project's other configuration dumps.
+
+The evidence describes **winning composed values**, not a full history of every
+assignment: overwritten definitions and inactive conditional branches are not
+reconstructed. Raw values preserve pre-variable-expansion content after YAML
+composition, not source quoting or original file formatting. Variable links are
+expansion evidence, not proof that a compiler executed those flags, nor a trace
+of transformations inside element plugins. Project includes may require junction
+source retrieval during loading; no artifact checkout, build, source checkout or
+integration commands are requested by the provenance query.
+
+All output is headless text or JSON. Normal success exits 0; invalid inputs,
+unsupported backends and unavailable referenced evidence exit 2, interruption 130.
+The existing per-command timeout and output bounds apply. Native backend tests
+cover composed includes, overrides, conditional options, references and unchanged
+ordinary `bst show`; CI tests the fork's pure Python changes against the released
+BuildStream compiled runtime on Python 3.10/3.14.
