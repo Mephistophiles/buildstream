@@ -10,6 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ['3.10', '3.14']
     steps:
@@ -17,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '${{ matrix.python }}'
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap
       - run: python -m pip install './contrib/bst-grep[test]' 'BuildStream==2.8.0'
       - run: python -m pytest -c contrib/bst-grep/pyproject.toml contrib/bst-grep/tests
         env:
