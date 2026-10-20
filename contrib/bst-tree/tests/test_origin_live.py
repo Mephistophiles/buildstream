@@ -97,3 +97,23 @@ def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path
         text=True,
     )
     assert plain.returncode == 0 and "echo -O3 -g" in plain.stdout
+
+    # Snapshot sources and compare fully offline: both sides retain their own
+    # include locations, transitive variables and applied conditional evidence.
+    before, after = tmp_path / "before.json", tmp_path / "after.json"
+    for path, extra in [(before, []), (after, ["--option", "debug", "True"])]:
+        assert (
+            main(["snapshot", "app.bst", "-C", str(root), "--provenance", "--history", "-o", str(path), *extra]) == 0
+        )
+        assert json.loads(path.read_text())["format_version"] == 3
+    assert main(["diff", str(before), str(after), "--explain", "--format", "json", "--check"]) == 1
+    record = json.loads(capsys.readouterr().out)["explanation"]["records"][0]
+    change = next(c for c in record["input_changes"] if c["path"] == "/env/CFLAGS")
+    assert change["old"]["value"] == "-O3 -g" and change["new"]["value"] == "-O0 -g"
+    assert change["old"]["sources"][0]["origin"]["file"].endswith("flags.yml")
+    optimization = next(s for s in change["new"]["sources"] if s["path"] == "/vars/optimization")
+    assert optimization["conditions"][0]["expression"] == "debug"
+    assert "history" not in optimization
+    assert main(["diff", str(before), str(after), "--explain", "--history"]) == 0
+    text = capsys.readouterr().out
+    assert "flags.yml" in text and "Applied condition" in text and "overridden (define)" in text

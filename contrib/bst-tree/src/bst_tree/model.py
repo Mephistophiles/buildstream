@@ -52,10 +52,11 @@ class Graph:
     edges: dict[tuple[str, str], frozenset[str]]
     metadata: dict
     details: dict | None = None
+    provenance: dict | None = None
 
     @property
     def format_version(self):
-        return 2 if self.details is not None else 1
+        return 3 if self.provenance is not None else 2 if self.details is not None else 1
 
     def adjacency(self, reverse=False):
         result = {name: [] for name in self.nodes}
@@ -89,8 +90,14 @@ class Graph:
                     edges[parent, child] = kinds
                     included.add(child)
                     queue.append(child)
-        return Graph(self.targets, {n: self.nodes[n] for n in included}, edges, self.metadata,
-                     {n: self.details[n] for n in included} if self.details is not None else None)
+        return Graph(
+            self.targets,
+            {n: self.nodes[n] for n in included},
+            edges,
+            self.metadata,
+            {n: self.details[n] for n in included} if self.details is not None else None,
+            {n: self.provenance[n] for n in included} if self.provenance is not None else None,
+        )
 
     def paths_to(self, destination):
         """One shortest path per root; linear traversal rather than path enumeration."""
@@ -127,12 +134,18 @@ class Graph:
         }
         if self.details is not None:
             result["details"] = self.details
+        if self.provenance is not None:
+            result["provenance"] = self.provenance
         return result
 
     @classmethod
     def from_dict(cls, data):
-        if not isinstance(data, dict) or type(data.get("format_version")) is not int or data["format_version"] not in (1, 2):
-            raise ValueError("Unsupported snapshot format (expected version 1 or 2)")
+        if (
+            not isinstance(data, dict)
+            or type(data.get("format_version")) is not int
+            or data["format_version"] not in (1, 2, 3)
+        ):
+            raise ValueError("Unsupported snapshot format (expected version 1, 2 or 3)")
         targets, nodes, records = data.get("targets"), data.get("nodes"), data.get("edges")
         if not isinstance(nodes, dict) or not nodes or not all(isinstance(n, str) and n for n in nodes):
             raise ValueError("Snapshot requires named nodes")
@@ -167,11 +180,18 @@ class Graph:
                 raise ValueError("Duplicate edge")
             edges[parent, child] = frozenset(kinds)
         details = data.get("details")
-        if data["format_version"] == 2:
+        if data["format_version"] >= 2:
             validate_details(details, nodes)
         elif "details" in data:
             raise ValueError("Snapshot details require format version 2")
-        return cls(sorted(set(targets)), nodes, edges, data["metadata"], details)
+        provenance = data.get("provenance")
+        if data["format_version"] == 3:
+            from .provenance import validate_snapshot_provenance
+
+            validate_snapshot_provenance(provenance, nodes, details)
+        elif "provenance" in data:
+            raise ValueError("Snapshot provenance requires format version 3")
+        return cls(sorted(set(targets)), nodes, edges, data["metadata"], details, provenance)
 
 
 def read_snapshot(path):

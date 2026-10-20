@@ -13,6 +13,7 @@
 #
 """Read the documented bst show interface, with framed multiline fields."""
 
+import json
 import re
 import subprocess
 import uuid
@@ -74,7 +75,10 @@ def parse_report(report, marker, *, detailed=False):
     return (*result, details) if detailed else result
 
 
-def capture(targets, directory=None, options=(), run=None, *, detailed=False):
+def capture(targets, directory=None, options=(), run=None, *, detailed=False, provenance=False, history=False):
+    if history and not provenance:
+        raise ValueError("--history requires --provenance")
+    detailed = detailed or provenance
     base = command_base(directory, options)
     run = run if run is not None else CliRunner()
 
@@ -100,4 +104,36 @@ def capture(targets, directory=None, options=(), run=None, *, detailed=False):
         {"bst_version": version, "options": dict(options), "strict": True},
         parsed[2] if detailed else None,
     )
+    if provenance:
+        from .provenance import validate_report
+
+        try:
+            data = validate_report(
+                json.loads(
+                    execute(
+                        [
+                            "show",
+                            "--deps",
+                            "all",
+                            "--order",
+                            "alpha",
+                            "--provenance",
+                            *(["--history"] if history else []),
+                            "--",
+                            *targets,
+                        ]
+                    )
+                )
+            )
+        except ValueError as error:
+            raise ValueError(
+                "Snapshot provenance requires this fork's bst show --provenance. " + str(error)
+            ) from error
+        graph.provenance = {element["element"]: element for element in data["elements"]}
+        if history and any(not e.get("history_available") for e in data["elements"]):
+            raise ValueError("Snapshot history requires this fork's rebuilt native node extension")
+        # Reject project drift between the graph/details and provenance queries.
+        repeated = execute(["show", "--deps", "all", "--order", "alpha", "--format", format_string, "--", *targets])
+        if parse_report(repeated, marker, detailed=True) != parsed:
+            raise ValueError("Project changed during provenance capture; retry the snapshot")
     return Graph.from_dict(graph.as_dict())

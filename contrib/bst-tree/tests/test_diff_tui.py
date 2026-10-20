@@ -21,10 +21,17 @@ from bst_tree.model import DETAIL_FIELDS, Graph
 
 
 def pair():
-    nodes = {n: {"kind": "manual", "key": "a" * 64, "source_info": None, "workspace": False}
-             for n in ("app.bst", "tool[1].bst", "mystery.bst")}
-    old = Graph(["app.bst"], nodes, {("app.bst", "tool[1].bst"): frozenset(["build"])},
-                {"strict": True}, {n: {f: {} for f in DETAIL_FIELDS} for n in nodes})
+    nodes = {
+        n: {"kind": "manual", "key": "a" * 64, "source_info": None, "workspace": False}
+        for n in ("app.bst", "tool[1].bst", "mystery.bst")
+    }
+    old = Graph(
+        ["app.bst"],
+        nodes,
+        {("app.bst", "tool[1].bst"): frozenset(["build"])},
+        {"strict": True},
+        {n: {f: {} for f in DETAIL_FIELDS} for n in nodes},
+    )
     new = copy.deepcopy(old)
     new.details["tool[1].bst"]["env"] = {"CFLAGS": "-O3"}
     for node in new.nodes.values():
@@ -101,3 +108,26 @@ async def test_all_and_filtered_comparison():
         await pilot.press("1")
         await pilot.pause()
         assert app.row_names == ["tool[1].bst"]
+
+
+async def test_sources_view_and_history_toggle():
+    from test_input_diff import pair as provenance_pair
+
+    old, new = provenance_pair()
+    app = DiffExplorer(old, new)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert app.selected_name == "app.bst"
+        app.query_one(Select).value = "sources"
+        await pilot.pause()
+        assert app.query_one(RichLog).lines
+        await pilot.press("h")
+        await pilot.pause()
+        assert app.show_history and app.query_one(Select).value == "sources"
+        await pilot.press("h")
+        await pilot.pause()
+        assert not app.show_history
+        # Ordinary section diffs also include the corresponding input sources.
+        app.query_one(Select).value = "env"
+        await pilot.pause()
+        assert app.query_one(RichLog).lines

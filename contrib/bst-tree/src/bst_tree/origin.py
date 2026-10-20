@@ -18,6 +18,7 @@ import re
 from bst_tools_core.project import command_base
 from bst_tools_core.process import CliRunner
 from .headless import project_arguments
+from .provenance import validate_report
 
 
 def configure_parser(commands):
@@ -45,69 +46,6 @@ def configure_parser(commands):
     project_arguments(p)
     p.set_defaults(command="origin")
     return p
-
-
-def validate_report(report):
-    if (
-        not isinstance(report, dict)
-        or report.get("format_version") != 1
-        or report.get("query") != "input-provenance"
-        or not isinstance(report.get("elements"), list)
-    ):
-        raise ValueError("Unsupported provenance report; use bst show --provenance from this fork")
-    seen = set()
-    for element in report["elements"]:
-        if not isinstance(element, dict) or not isinstance(element.get("element"), str) or element["element"] in seen:
-            raise ValueError("Invalid provenance element")
-        seen.add(element["element"])
-        paths = set()
-        if not isinstance(element.get("entries"), list):
-            raise ValueError("Invalid provenance entries")
-        for entry in element["entries"]:
-            if (
-                not isinstance(entry, dict)
-                or not isinstance(entry.get("path"), str)
-                or not entry["path"].startswith("/")
-                or entry["path"] in paths
-            ):
-                raise ValueError("Invalid/duplicate provenance path")
-            paths.add(entry["path"])
-            if (
-                not isinstance(entry.get("origin"), dict)
-                or type(entry.get("value_available")) is not bool
-                or not isinstance(entry.get("references"), list)
-            ):
-                raise ValueError("Invalid provenance evidence")
-            for ref in entry["references"]:
-                if (
-                    not isinstance(ref, dict)
-                    or not isinstance(ref.get("variable"), str)
-                    or not isinstance(ref.get("path"), str)
-                ):
-                    raise ValueError("Invalid variable reference")
-            if "history" in entry:
-                if not isinstance(entry["history"], list) or not entry["history"]:
-                    raise ValueError("Invalid provenance history")
-                for step in entry["history"]:
-                    if (
-                        not isinstance(step, dict)
-                        or "raw" not in step
-                        or not isinstance(step.get("origin"), dict)
-                        or step.get("operation") not in ("define", "generated", "compose-list")
-                        or step.get("state") not in ("overridden", "effective", "contributes")
-                    ):
-                        raise ValueError("Invalid provenance history step")
-                    conditions = step.get("conditions", [])
-                    if not isinstance(conditions, list):
-                        raise ValueError("Invalid history conditions")
-                    for condition in conditions:
-                        if (
-                            not isinstance(condition, dict)
-                            or not isinstance(condition.get("expression"), str)
-                            or not isinstance(condition.get("origin"), dict)
-                        ):
-                            raise ValueError("Invalid history condition")
-    return report
 
 
 def select(report, element=None, paths=(), follow=True, history=False):

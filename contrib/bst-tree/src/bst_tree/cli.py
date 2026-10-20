@@ -85,6 +85,16 @@ def parser():
                 action="store_true",
                 help="Capture resolved config, variables, environment and public data for change analysis",
             )
+            sub.add_argument(
+                "--provenance",
+                action="store_true",
+                help="Save input sources alongside resolved details; requires fork bst",
+            )
+            sub.add_argument(
+                "--history",
+                action="store_true",
+                help="Also capture YAML override history; requires --provenance and rebuilt fork bst",
+            )
     diff = commands.add_parser(
         "diff",
         help="Compare two snapshots without loading a project",
@@ -108,6 +118,9 @@ def parser():
         help="Open the interactive change inspector (alias for --format tui)",
     )
     diff.add_argument("--explain", action="store_true", help="Include observed inputs and dependency candidates")
+    diff.add_argument(
+        "--history", action="store_true", help="Expand saved YAML input histories; requires --explain or --format tui"
+    )
     diff.add_argument(
         "--semantic",
         action="store_true",
@@ -190,6 +203,8 @@ def main(argv=None):
 
             return run_inspection(args)
         if args.command == "diff":
+            if args.history and not (args.explain or args.format == "tui"):
+                raise ValueError("--history requires --explain or --format tui")
             old, new = read_snapshot(args.old), read_snapshot(args.new)
             fields = set(DIFF_FIELDS)
             if args.structure_only:
@@ -233,6 +248,7 @@ def main(argv=None):
                     semantic=args.semantic,
                     semantic_scope=args.scope or "all",
                     semantic_model=semantic_model,
+                    history=args.history,
                 ).run()
                 return 1 if args.check and changed else 0
             if semantic_report is not None:
@@ -240,7 +256,9 @@ def main(argv=None):
                 if args.explain:
                     from .explain import analyze, render_explanation
 
-                    explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
+                    explanation = analyze(
+                        old, new, fields=fields, limit=None if args.format == "json" else 10, history=args.history
+                    )
                     if args.format == "json":
                         semantic_report["explanation"] = explanation
                 print(
@@ -255,7 +273,9 @@ def main(argv=None):
             if args.explain:
                 from .explain import analyze, render_explanation
 
-                explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
+                explanation = analyze(
+                    old, new, fields=fields, limit=None if args.format == "json" else 10, history=args.history
+                )
                 if args.format == "json":
                     delta["explanation"] = explanation
             if explanation is not None and args.format == "tree":
@@ -275,7 +295,14 @@ def main(argv=None):
             )
             return 1 if args.check and has_changes(delta) else 0
         if args.command == "snapshot":
-            graph = capture(args.targets, args.directory, args.option, detailed=args.details)
+            graph = capture(
+                args.targets,
+                args.directory,
+                args.option,
+                detailed=args.details,
+                provenance=args.provenance,
+                history=args.history,
+            )
             if args.output == "-":
                 print(json.dumps(graph.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
             else:

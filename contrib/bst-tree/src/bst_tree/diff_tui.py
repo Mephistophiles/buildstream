@@ -21,6 +21,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
 from .explain import CATEGORY_LABELS, analyze, overview, sections, unified
+from .input_diff import input_changes, render_inputs
 
 
 class DiffExplorer(App):
@@ -52,6 +53,7 @@ class DiffExplorer(App):
         ("3", "filter('unknown')", "Unexplained"),
         ("f", "sections", "Section"),
         ("c", "context", "More context"),
+        ("h", "history", "YAML history"),
         Binding("j", "down", "Down", show=False),
         Binding("k", "up", "Up", show=False),
         Binding("escape", "back", "Elements", show=False),
@@ -69,6 +71,7 @@ class DiffExplorer(App):
         semantic_scope="all",
         semantic_targets=None,
         semantic_model=None,
+        history=False,
     ):
         super().__init__()
         self.old, self.new = old, new
@@ -80,6 +83,7 @@ class DiffExplorer(App):
         self.category = "local" if not show_all and self.report["summary"].get("local") else "all"
         self.selected_name = None
         self.full_context = False
+        self.show_history = history
         self.row_names = []
         self.semantic_start = semantic
         self.semantic_scope = semantic_scope
@@ -149,6 +153,7 @@ class DiffExplorer(App):
             "down",
             "up",
             "semantic",
+            "history",
         }:
             return False
         if isinstance(self.focused, Input) and action != "back":
@@ -207,6 +212,8 @@ class DiffExplorer(App):
         if name is not None:
             options += [("Diff · " + section, section) for section in sections(self.old, self.new, name, self.fields)]
             record = self.records.get(name)
+            if record and record.get("input_change_count"):
+                options.append(("Input sources · h toggles history", "sources"))
             if record and record["candidates"]:
                 options.append(("Dependency candidates", "candidates"))
             if record and record["consumers"]:
@@ -214,7 +221,9 @@ class DiffExplorer(App):
         options.append(("Snapshot context", "context"))
         select = self.query_one(Select)
         select.set_options(options)
-        select.value = "overview"
+        select.value = (
+            "sources" if self.show_history and any(value == "sources" for _, value in options) else "overview"
+        )
         self.render_detail()
 
     @on(Select.Changed, "#section")
@@ -231,6 +240,9 @@ class DiffExplorer(App):
         if section == "overview":
             if record:
                 log.write(overview(record))
+                if record.get("input_changes"):
+                    log.write("\nInput sources · choose Sources for all inputs; h toggles YAML history\n")
+                    log.write(render_inputs(record["input_changes"], limit=2, source_limit=3))
                 changed_sections = sections(self.old, self.new, name, self.fields)
                 # Show one small diff immediately; hashes stay behind the section picker.
                 first = next((s for s in changed_sections if s != "key"), None)
@@ -245,6 +257,9 @@ class DiffExplorer(App):
                 log.write("No changes in the selected comparison." if name else "No matching changed elements.")
                 log.write("\n" + "\n".join(self.report["warnings"]))
                 log.write(diff_text(unified(self.old, self.new, None, "context")))
+        elif section == "sources" and name is not None:
+            changes, _ = input_changes(self.old, self.new, name, history=self.show_history)
+            log.write(render_inputs(changes, history=self.show_history, limit=None, source_limit=None))
         elif section in ("candidates", "consumers") and record:
             if section == "candidates":
                 log.write(
@@ -267,6 +282,14 @@ class DiffExplorer(App):
             log.write(
                 diff_text(unified(self.old, self.new, name, section, full=self.full_context, fields=self.fields))
             )
+            if record and section in ("config", "vars", "env", "public"):
+                changes, _ = input_changes(self.old, self.new, name, history=self.show_history)
+                changes = [
+                    change
+                    for change in changes
+                    if change["path"].startswith("/" + section + "/") or change["path"] == "/" + section
+                ]
+                log.write("\n" + render_inputs(changes, history=self.show_history))
 
         log.scroll_home(animate=False)
 
@@ -296,6 +319,13 @@ class DiffExplorer(App):
     def action_context(self):
         self.full_context = not self.full_context
         self.notify("Full context" if self.full_context else "3 lines of context")
+        self.render_detail()
+
+    def action_history(self):
+        self.show_history = not self.show_history
+        if self.selected_name and self.records.get(self.selected_name, {}).get("input_change_count"):
+            self.query_one(Select).value = "sources"
+        self.notify("YAML history expanded" if self.show_history else "Compact input sources")
         self.render_detail()
 
     def action_back(self):

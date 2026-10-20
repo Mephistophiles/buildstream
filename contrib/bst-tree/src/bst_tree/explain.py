@@ -27,8 +27,11 @@ LIMITATION = (
     "Workspace file contents are not captured."
 )
 CATEGORY_LABELS = {
-    "local": "Observed inputs", "dependency": "Dependency candidates",
-    "unknown": "Unexplained", "structural": "Added / removed", "unchanged": "Unchanged",
+    "local": "Observed inputs",
+    "dependency": "Dependency candidates",
+    "unknown": "Unexplained",
+    "structural": "Added / removed",
+    "unchanged": "Unchanged",
 }
 
 
@@ -46,7 +49,7 @@ def build_inputs(adjacency, name):
     return seen
 
 
-def analyze(old, new, *, fields=None, limit=None):
+def analyze(old, new, *, fields=None, limit=None, history=False):
     delta = compare(old, new, fields)
     changes = {item["name"]: item for item in delta["nodes"]}
     edge_changes = {}
@@ -64,33 +67,49 @@ def analyze(old, new, *, fields=None, limit=None):
         evidence = []
         selected_old, selected_new = change.get("old") or {}, change.get("new") or {}
         if before is not None and after is not None:
-            evidence = [f for f in ("kind", "source_info", "workspace")
-                        if f in selected_old and selected_old[f] != selected_new[f]]
+            evidence = [
+                f
+                for f in ("kind", "source_info", "workspace")
+                if f in selected_old and selected_old[f] != selected_new[f]
+            ]
             if "details" in selected_old:
-                evidence += [f for f in DETAIL_FIELDS
-                             if selected_old["details"][f] != selected_new["details"][f]]
+                evidence += [f for f in DETAIL_FIELDS if selected_old["details"][f] != selected_new["details"][f]]
         if edge_changes.get(name):
             evidence.append("dependencies")
-        key_changed = ("key" in selected_old and "key" in selected_new
-                       and selected_old["key"] != selected_new["key"])
+        key_changed = "key" in selected_old and "key" in selected_new and selected_old["key"] != selected_new["key"]
         resolved = bool(before and after and before["key"] is not None and after["key"] is not None)
         if key_changed and resolved and strict:
             key_parents |= 1 << index[name]
         if evidence:
             local_mask |= 1 << index[name]
         records[name] = {
-            "name": name, "category": "structural" if before is None or after is None else
-            "local" if evidence else "unknown", "evidence": evidence,
-            "key_changed": key_changed, "keys_resolved": resolved,
-            "candidates": [], "candidate_count": 0,
-            "edges": edge_changes.get(name, []), "change": change.get("change", "modified"),
-            "consumers": [], "consumer_count": 0,
+            "name": name,
+            "category": "structural" if before is None or after is None else "local" if evidence else "unknown",
+            "evidence": evidence,
+            "key_changed": key_changed,
+            "keys_resolved": resolved,
+            "candidates": [],
+            "candidate_count": 0,
+            "edges": edge_changes.get(name, []),
+            "change": change.get("change", "modified"),
+            "consumers": [],
+            "consumer_count": 0,
         }
+        if fields is None or "details" in fields:
+            from .input_diff import input_changes
+
+            inputs, count = input_changes(old, new, name, history=history, limit=limit)
+            records[name]["input_changes"] = inputs
+            records[name]["input_change_count"] = count
     if key_parents:
         old_graph, new_graph = KeyGraph(old, names), KeyGraph(new, names)
-        changed_keys = sum(1 << index[n] for n in old.nodes.keys() & new.nodes.keys()
-                           if old.nodes[n]["key"] is not None and new.nodes[n]["key"] is not None
-                           and old.nodes[n]["key"] != new.nodes[n]["key"])
+        changed_keys = sum(
+            1 << index[n]
+            for n in old.nodes.keys() & new.nodes.keys()
+            if old.nodes[n]["key"] is not None
+            and new.nodes[n]["key"] is not None
+            and old.nodes[n]["key"] != new.nodes[n]["key"]
+        )
         for name, record in records.items():
             i = index[name]
             before, after = old_graph.inputs[i], new_graph.inputs[i]
@@ -100,11 +119,17 @@ def analyze(old, new, *, fields=None, limit=None):
             origins = members(candidates & local_mask, names, limit)
             remaining = None if limit is None else limit - len(origins)
             candidates_shown = origins + members(candidates & ~local_mask, names, remaining)
-            record["candidates"] = [{
-                "name": child,
-                "reason": "build input added / removed" if (before ^ after) & (1 << index[child])
-                else "build input key changed",
-            } for child in candidates_shown]
+            record["candidates"] = [
+                {
+                    "name": child,
+                    "reason": (
+                        "build input added / removed"
+                        if (before ^ after) & (1 << index[child])
+                        else "build input key changed"
+                    ),
+                }
+                for child in candidates_shown
+            ]
             if candidates and record["category"] == "unknown":
                 record["category"] = "dependency"
             before, after = old_graph.consumers[i], new_graph.consumers[i]
@@ -113,14 +138,30 @@ def analyze(old, new, *, fields=None, limit=None):
             record["consumers"] = members(consumers, names, limit)
     warnings = [LIMITATION]
     if old.details is None or new.details is None:
-        warnings.append("Detailed inputs are unavailable on one or both sides; use snapshot --details for both snapshots.")
+        warnings.append(
+            "Detailed inputs are unavailable on one or both sides; use snapshot --details for both snapshots."
+        )
+    if old.provenance is None or new.provenance is None:
+        warnings.append(
+            "Input sources are not captured on one or both sides; use snapshot --provenance for both snapshots."
+        )
+    if history and any(
+        g.provenance is not None and any(not e["history_available"] for e in g.provenance.values()) for g in (old, new)
+    ):
+        warnings.append("Some input history is not captured; use snapshot --provenance --history.")
     if not strict:
         warnings.append("Strict mode is not confirmed on both sides; dependency-key attribution is disabled.")
     if old.metadata != new.metadata:
-        warnings.append("Snapshot context differs (BuildStream version / project options / strict mode); inspect Context.")
+        warnings.append(
+            "Snapshot context differs (BuildStream version / project options / strict mode); inspect Context."
+        )
     return {
-        "format_version": 1, "summary": dict(Counter(r["category"] for r in records.values())),
-        "records": list(records.values()), "warnings": warnings, "related_limit": limit,
+        "format_version": 1,
+        "summary": dict(Counter(r["category"] for r in records.values())),
+        "records": list(records.values()),
+        "warnings": warnings,
+        "related_limit": limit,
+        "history_requested": history,
     }
 
 
@@ -140,8 +181,8 @@ def section_values(old, new, name, section, fields=None):
             return {child: sorted(kinds) for child, kinds in graph.adjacency()[name]}
         if section == "key":
             return graph.nodes[name]["key"]
-        return {k: v for k, v in graph.nodes[name].items()
-                if k != "key" and (fields is None or k in fields)}
+        return {k: v for k, v in graph.nodes[name].items() if k != "key" and (fields is None or k in fields)}
+
     return value(old), value(new)
 
 
@@ -149,10 +190,16 @@ def unified(old, new, name, section, *, full=False, fields=None):
     before, after = section_values(old, new, name, section, fields)
     if before == after:
         return "No changes in this section."
-    return "\n".join(difflib.unified_diff(
-        value_lines(before), value_lines(after), fromfile="before/" + section,
-        tofile="after/" + section, lineterm="", n=1000000 if full else 3,
-    ))
+    return "\n".join(
+        difflib.unified_diff(
+            value_lines(before),
+            value_lines(after),
+            fromfile="before/" + section,
+            tofile="after/" + section,
+            lineterm="",
+            n=1000000 if full else 3,
+        )
+    )
 
 
 def sections(old, new, name, fields=None):
@@ -163,7 +210,11 @@ def sections(old, new, name, fields=None):
             available += list(DETAIL_FIELDS)
     if selected is None or "key" in selected:
         available.append("key")
-    return [s for s in available if section_values(old, new, name, s, fields)[0] != section_values(old, new, name, s, fields)[1]]
+    return [
+        s
+        for s in available
+        if section_values(old, new, name, s, fields)[0] != section_values(old, new, name, s, fields)[1]
+    ]
 
 
 def overview(record):
@@ -190,14 +241,26 @@ def overview(record):
 
 
 def render_explanation(report):
+    from .input_diff import render_inputs
+
     counts = report["summary"]
-    lines = ["Change analysis: " + "; ".join(f"{CATEGORY_LABELS[c]}: {counts.get(c, 0)}"
-             for c in ("local", "dependency", "unknown", "structural"))]
+    lines = [
+        "Change analysis: "
+        + "; ".join(
+            f"{CATEGORY_LABELS[c]}: {counts.get(c, 0)}" for c in ("local", "dependency", "unknown", "structural")
+        )
+    ]
     for category in ("local", "unknown", "structural", "dependency"):
         entries = [r for r in report["records"] if r["category"] == category]
         for record in entries[:10]:
             reason = ", ".join(record["evidence"]) or f"{record['candidate_count']} dependency candidate(s)"
             lines.append(f"  {record['name']}: {reason}")
+            if record.get("input_changes"):
+                lines.append(render_inputs(record["input_changes"], history=report.get("history_requested", False)))
+                if record["input_change_count"] > len(record["input_changes"]):
+                    lines.append(
+                        f"  … {record['input_change_count'] - len(record['input_changes'])} more inputs; use --format json or tui."
+                    )
         if len(entries) > 10:
             lines.append(f"  … {len(entries) - 10} more {CATEGORY_LABELS[category].lower()}; use --format tui or json")
     lines.extend("Note: " + warning for warning in report["warnings"])

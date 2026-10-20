@@ -106,6 +106,7 @@ def subset(graph, names, roots, edges=None):
         },
         graph.metadata,
         {n: graph.details[n] for n in sorted(names)} if graph.details is not None else None,
+        {n: graph.provenance[n] for n in sorted(names)} if graph.provenance is not None else None,
     )
 
 

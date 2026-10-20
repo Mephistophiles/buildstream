@@ -24,7 +24,7 @@ jobs:
         run: |
           python contrib/bst-tree/tests/build_origin_runtime.py "$RUNNER_TEMP/bst-origin-runtime"
           echo "PYTHONPATH=$RUNNER_TEMP/bst-origin-runtime" >> "$GITHUB_ENV"
-      - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests/test_origin.py contrib/bst-tree/tests/test_origin_live.py contrib/bst-tree/tests/test_origin_history.py
+      - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests/test_origin.py contrib/bst-tree/tests/test_origin_live.py contrib/bst-tree/tests/test_origin_history.py contrib/bst-tree/tests/test_input_diff.py
         env:
           BST_TREE_TEST_ORIGIN: "1"
       - name: Existing native YAML regression suite without history enabled

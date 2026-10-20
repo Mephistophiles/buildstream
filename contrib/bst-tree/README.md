@@ -340,6 +340,46 @@ it to JSON output for the full evidence records. The default noninteractive outp
 and JSON diff format remain compatible; the extra `explanation` object is opt-in.
 Snapshot and noninteractive diff commands still do not import Textual.
 
+### Input sources on both sides of a diff
+
+Capture source locations with each snapshot to connect changed resolved settings
+to their winning YAML definitions and transitive variable references:
+
+```sh
+bst-tree snapshot app.bst --provenance --history -o before.json
+# Change project inputs, or use different --option values for the second snapshot.
+bst-tree snapshot app.bst --provenance --history -o after.json
+bst-tree diff before.json after.json --explain
+bst-tree diff before.json after.json --explain --history
+bst-tree diff before.json after.json --explain --format json
+bst-tree diff before.json after.json --tui
+```
+
+`snapshot --provenance` implies `--details` and requires this fork's
+`bst show --provenance`. The optional snapshot `--history` additionally requires
+the rebuilt native extension described under Configuration provenance. Without
+it, winning locations and references are still captured. Provenance is queried
+for the whole selected graph in one invocation. A repeated framed graph/details
+query detects project drift, and every saved provenance value must match the
+resolved details. This is not a filesystem transaction; avoid editing the project
+while capturing a snapshot. No build or artifact export is performed.
+
+`diff --explain` shows each changed input's before/after value and independently
+saved source locations, with transitive variable evidence. Applied conditions are
+shown when captured; the full override chains remain hidden until `--history`
+is requested. In the TUI, choose **Input sources** for all changed inputs and press
+`h` to toggle history. Individual config/vars/env/public section diffs also show
+their input sources. Text and the overview are abbreviated; JSON exports all
+changed inputs and sources, and `--history` includes their full saved chains.
+
+Sources are supporting evidence, not proof of cache-key or build causality.
+Lists are compared as whole inputs, retaining their captured container or member
+origins rather than pairing commands by shifted indices. Missing provenance or
+history on one side is reported explicitly; added/removed values are distinguished
+from JSON null. A change only in YAML location/history does not create a resolved
+input difference or affect `--check`. Field filters still apply. Snapshot-only
+diff works without `bst`, project files, or Textual.
+
 ## Data and limitations
 
 This tool uses documented `bst show` fields, not private BuildStream APIs. The
@@ -358,10 +398,14 @@ not interpreted as an upstream version change. Workspace content is not captured
 only workspace presence is recorded. Artifact contents and sizes are not compared.
 
 Basic snapshots use `format_version: 1`; `snapshot --details` writes version 2
-with a separate, validated per-element `details` map. Both versions are readable.
+with a separate, validated per-element `details` map. `snapshot --provenance`
+writes version 3 with an additional `provenance` map covering exactly those nodes.
+All three versions are readable. Provenance entries, reference coverage, and
+resolved values are validated on load.
 Snapshots contain canonical targets, metadata (bst version, project
 options and strict mode), a map of nodes keyed by full junction-qualified name,
-and typed directed edges. There are no timestamps or absolute project paths.
+and typed directed edges. Basic/detailed snapshots have no timestamps or absolute
+project paths; provenance snapshots retain filenames as supplied by BuildStream.
 Unknown format versions and dangling edges are rejected. Treat snapshots as project
 data: source provenance may contain URLs and other plugin-provided information.
 
