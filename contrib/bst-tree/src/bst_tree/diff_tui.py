@@ -56,7 +56,8 @@ class DiffExplorer(App):
     #body.compact #right { width: 100%; height: 1fr; }
     """
     BINDINGS = [
-        ("q", "quit", "Quit"), ("slash", "search", "Search"),
+        ("q", "quit", "Quit"), ("m", "semantic", "Reachability"),
+        ("slash", "search", "Search"),
         ("0", "filter('all')", "All"), ("1", "filter('local')", "Inputs"),
         ("2", "filter('dependency')", "Deps"), ("3", "filter('unknown')", "Unexplained"),
         ("f", "sections", "Section"), ("c", "context", "More context"),
@@ -64,7 +65,8 @@ class DiffExplorer(App):
         Binding("escape", "back", "Elements", show=False),
     ]
 
-    def __init__(self, old, new, *, fields=None, show_all=False, labels=("before", "after")):
+    def __init__(self, old, new, *, fields=None, show_all=False, labels=("before", "after"),
+                 semantic=False, semantic_scope="all", semantic_targets=None, semantic_model=None):
         super().__init__()
         self.old, self.new = old, new
         self.fields = fields
@@ -76,6 +78,10 @@ class DiffExplorer(App):
         self.selected_name = None
         self.full_context = False
         self.row_names = []
+        self.semantic_start = semantic
+        self.semantic_scope = semantic_scope
+        self.semantic_targets = semantic_targets
+        self.semantic_model = semantic_model
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -91,7 +97,8 @@ class DiffExplorer(App):
                      id="warning", markup=False)
         with Horizontal(id="filters"):
             yield Tabs(Tab("All", id="all"), Tab("Inputs", id="local"),
-                       Tab("Dependencies", id="dependency"), Tab("Unexplained", id="unknown"), active=self.category)
+                       Tab("Dependencies", id="dependency"), Tab("Unexplained", id="unknown"),
+                       active=self.category, id="categories")
             yield Input(placeholder="Filter element names…", id="search")
         with Container(id="body"):
             yield DataTable(id="elements", cursor_type="row")
@@ -102,21 +109,35 @@ class DiffExplorer(App):
                 yield RichLog(id="diff", wrap=True, markup=False, highlight=False, auto_scroll=False)
         yield Footer()
 
-    def on_mount(self):
+    async def on_mount(self):
         self.sub_title = f"{self.labels[0]} → {self.labels[1]}"
         self.query_one(DataTable).add_columns("Element", "Evidence")
         self.populate()
         self.query_one(DataTable).focus()
         self.query_one("#body").set_class(self.size.width < 110, "compact")
+        if self.semantic_start:
+            await self.action_semantic()
 
     def on_resize(self, event):
         if self.is_mounted:
             self.query_one("#body").set_class(event.size.width < 110, "compact")
 
     def check_action(self, action, parameters):
+        if len(self.screen_stack) > 1 and action in {
+            "filter", "search", "sections", "context", "back", "down", "up", "semantic",
+        }:
+            return False
         if isinstance(self.focused, Input) and action != "back":
             return False
         return super().check_action(action, parameters)
+
+    async def action_semantic(self):
+        from .semantic import SemanticDiff
+        from .semantic_tui import SemanticScreen
+
+        if self.semantic_model is None:
+            self.semantic_model = SemanticDiff(self.old, self.new, self.semantic_targets)
+        await self.push_screen(SemanticScreen(self.semantic_model, scope=self.semantic_scope, show_all=self.show_all))
 
     def populate(self):
         table = self.query_one(DataTable)
@@ -145,7 +166,7 @@ class DiffExplorer(App):
         else:
             self.choose(None)
 
-    @on(DataTable.RowHighlighted)
+    @on(DataTable.RowHighlighted, "#elements")
     def selected(self, event):
         name = event.row_key.value
         if name in self.row_names:
@@ -169,7 +190,7 @@ class DiffExplorer(App):
         select.value = "overview"
         self.render_detail()
 
-    @on(Select.Changed)
+    @on(Select.Changed, "#section")
     def section_changed(self, event):
         if event.value is not Select.BLANK:
             self.render_detail()
@@ -216,12 +237,14 @@ class DiffExplorer(App):
 
         log.scroll_home(animate=False)
 
-    @on(Input.Changed)
+    @on(Input.Changed, "#search")
     def search_changed(self, event):
         self.populate()
 
-    @on(Tabs.TabActivated)
+    @on(Tabs.TabActivated, "#categories")
     def tab_changed(self, event):
+        if event.tab.id != self.query_one("#categories", Tabs).active:
+            return
         self.category = event.tab.id
         if self.is_mounted:
             self.populate()

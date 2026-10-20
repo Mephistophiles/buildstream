@@ -74,6 +74,12 @@ def parser():
     diff.add_argument("--tui", dest="format", action="store_const", const="tui",
                       help="Open the interactive change inspector (alias for --format tui)")
     diff.add_argument("--explain", action="store_true", help="Include observed inputs and dependency candidates")
+    diff.add_argument("--semantic", action="store_true",
+                      help="Compare per-target reachable dependencies and their build/runtime roles")
+    diff.add_argument("--scope", choices=("all", "run", "build"),
+                      help="Semantic roles to compare (default: all means build and runtime)")
+    diff.add_argument("--target", action="append", metavar="TARGET",
+                      help="Limit semantic comparison to a target requested in both snapshots; repeatable")
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
     diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
     diff.add_argument(
@@ -152,6 +158,20 @@ def main(argv=None):
             elif args.ignore_fields:
                 fields -= set(args.ignore_fields)
             delta = compare(old, new, fields=fields)
+            if (args.scope is not None or args.target is not None) and not args.semantic:
+                raise ValueError("--scope and --target require --semantic")
+            if args.semantic and args.reverse:
+                raise ValueError("--reverse applies to structural tree output; omit it for semantic comparison")
+            semantic_model = semantic_report = None
+            changed = has_changes(delta)
+            color = args.color == "always" or (args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ)
+            if args.semantic:
+                from .semantic import SemanticDiff, has_semantic_changes, render_semantic
+
+                semantic_model = SemanticDiff(old, new, args.target)
+                semantic_report = semantic_model.report(args.scope or "all", show_all=args.all,
+                                                       limit=None if args.format == "json" else 10)
+                changed = has_semantic_changes(semantic_report)
             if args.format == "tui":
                 if not sys.stdin.isatty() or not sys.stdout.isatty():
                     raise ValueError("interactive diff requires a terminal (TTY); use --explain for text or JSON")
@@ -159,8 +179,22 @@ def main(argv=None):
                     raise ValueError("--reverse applies to tree output; omit it for interactive diff")
                 from .diff_tui import DiffExplorer
                 DiffExplorer(old, new, fields=fields, show_all=args.all,
-                             labels=(os.path.basename(args.old), os.path.basename(args.new))).run()
-                return 1 if args.check and has_changes(delta) else 0
+                             labels=(os.path.basename(args.old), os.path.basename(args.new)),
+                             semantic=args.semantic, semantic_scope=args.scope or "all",
+                             semantic_model=semantic_model).run()
+                return 1 if args.check and changed else 0
+            if semantic_report is not None:
+                explanation = None
+                if args.explain:
+                    from .explain import analyze, render_explanation
+                    explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
+                    if args.format == "json":
+                        semantic_report["explanation"] = explanation
+                print(json.dumps(semantic_report, ensure_ascii=False, indent=2, sort_keys=True)
+                      if args.format == "json" else render_semantic(semantic_report, color=color))
+                if explanation is not None and args.format != "json":
+                    print("\n" + render_explanation(explanation))
+                return 1 if args.check and changed else 0
             explanation = None
             if args.explain:
                 from .explain import analyze, render_explanation
@@ -178,8 +212,7 @@ def main(argv=None):
                     new,
                     delta,
                     args.all,
-                    args.color == "always"
-                    or (args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ),
+                    color,
                     reverse=args.reverse,
                 )
             )

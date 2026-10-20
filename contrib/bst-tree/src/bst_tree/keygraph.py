@@ -87,12 +87,15 @@ class KeyGraph:
         for parent in reversed(order):
             for child in children[parent]:
                 closure[parent] |= closure[child]
+        self.runtime = [closure[component[node]] & ~(1 << node) for node in range(count)]
         self.inputs = [0] * count
+        self.build_runtime_root = [False] * count
         consumers = [0] * len(groups)
         for parent, dependencies in enumerate(build):
             for child in dependencies:
                 self.inputs[parent] |= closure[component[child]]
                 consumers[component[child]] |= 1 << parent
+            self.build_runtime_root[parent] = bool(self.inputs[parent] & (1 << parent))
             self.inputs[parent] &= ~(1 << parent)
         # Runtime descendants inherit the build consumers of their ancestors.
         for parent in order:

@@ -161,7 +161,8 @@ Reverse dependencies (dependency -> consumers):
 
 Here the edge annotation on `compiler.bst` describes its dependency on `lib.bst`.
 This shows changed declared relationships and context, not a calculation of
-whether a target lost all transitive paths to a dependency. `--reverse` only changes
+whether a target lost all transitive paths to a dependency; use `--semantic`
+for that comparison. `--reverse` only changes
 tree presentation; JSON edge directions, counts, and `--check` are unchanged.
 
 By default all fields are compared, including cache keys. To focus on a dependency
@@ -186,6 +187,77 @@ contain only selected attributes (empty objects in structure-only mode).
 Normal success exits 0. With `--check`, differences in the selected comparison exit 1.
 Errors exit 2. JSON output has its own `format_version: 1`, a summary, node and edge
 changes with `old`/`new`, and metadata changes.
+
+## Semantic dependency comparison
+
+```sh
+bst-tree diff before.json after.json --semantic
+bst-tree diff before.json after.json --semantic --scope run --check
+bst-tree diff before.json after.json --semantic --target app.bst --format json
+bst-tree diff before.json after.json --semantic --tui
+```
+
+This compares **reachable elements relative to each common requested target**,
+using either basic or detailed snapshots. No new snapshot fields or BuildStream
+installation are required. `--scope all` (the default) compares both roles:
+
+- **run**: the target's transitive runtime dependencies;
+- **build**: its direct build dependencies plus their transitive runtime dependencies.
+
+A dependency can have both roles. Build dependencies of build dependencies, and
+build dependencies of runtime dependencies, are not automatically part of these
+closures. The target itself is always excluded, including in cyclic snapshots.
+
+The report separates **added**, **removed**, **role changed**, and **still reachable**.
+For example, removing `app -> lib` while retaining `app -> mid -> lib` keeps `lib`
+in the runtime closure. It appears as still reachable, rather than removed. If
+`lib` changes from runtime to build-only use, it appears as a role change. A role
+loss can also be shown as a removal by selecting only that scope.
+
+Still-reachable entries have unchanged role membership but a relevant declared
+route changed. They include changes to longer routes even when one shortest
+witness stays identical. Unrelated edge changes and internal build-edge changes
+that do not affect either selected role are omitted. Unchanged dependencies are
+included only with `--all`. Per-target counts are exact; aggregate counts count
+**target/dependency pairs**, so a shared dependency can contribute to several targets.
+
+`--check` in semantic mode exits 1 for membership or role changes, or changes to
+the requested target set. A route-only reorganization exits 0. Attribute, source,
+cache-key and snapshot-metadata differences do not affect this status. Use the
+ordinary structural diff when declared edge changes should also fail a check.
+`--fields`, `--ignore-fields` and `--structure-only` continue to apply to optional
+`--explain` analysis, but do not change graph reachability. `--reverse` is rejected
+in semantic mode.
+
+Targets requested on only one side are listed separately and their closures are
+not compared: omitting a target from a capture is not evidence that its libraries
+were removed. Repeated `--target TARGET` limits comparison to targets requested
+in both snapshots and ignores other target-selection differences. With no common
+targets, the report explicitly states that there is no comparable closure.
+
+Text output shows at most ten entries per category and target, with exact total
+counts. JSON is a complete standalone report (`comparison: "semantic"`,
+`format_version: 1`) containing the selected scope, aggregate summary, per-target
+summaries and `changes` with role lists in `old` and `new`, plus unmatched targets.
+It does not enumerate all paths. `--explain` can add the cache-key evidence report.
+Colors follow the usual `--color` and `NO_COLOR` rules.
+
+In the TUI, press **m** from the input-change inspector to open reachability, or
+start there with `--semantic --tui`. Choose a target with **t**, a scope with **s**,
+and filter dependency names with **/**. **1** shows effects, **2** still-reachable
+entries, and **0** all listed entries. The initial view focuses on effects, or
+on still-reachable entries when there are no membership/role changes. Use **f**
+to inspect full witness paths, the changed routes relevant to a dependency, or
+snapshot context. Overview paths abbreviate long chains; the full path section
+does not. One deterministic shortest witness is found per role and side, on demand;
+cycles are bounded and all possible paths are never enumerated. Changed-route
+lists show up to 100 entries with exact counts. Escape returns to the input-change
+inspector, preserving its selection; **q** exits. The original CLI mode determines
+`--check` on exit, even if the other view was opened interactively.
+
+Reachability describes declared elements, not the final staged file set or a
+prediction that a build will run. The comparison is exact for the loaded snapshot
+graphs and does not search for consumers outside them.
 
 ## Interactive change analysis
 
@@ -223,6 +295,7 @@ are available in their own section, rather than filling the overview.
 - Arrows or `j`/`k`: select an element. Tab switches focus between controls.
 - `f`: select a changed section, dependency candidates, changed consumers, or context.
 - `c`: toggle three lines versus full diff context in a selected section.
+- `m`: inspect per-target semantic dependency effects; Escape returns to input changes.
 - `q`: exit. `--check` retains the same exit semantics after closing the inspector.
 
 `--all` also lists unchanged elements. Existing `--fields`, `--ignore-fields` and
@@ -311,10 +384,10 @@ BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib
 The implementation separates CLI parsing (`cli.py`), public BuildStream CLI
 queries (`adapter.py`), graph validation and snapshots (`model.py`), comparison
 (`diff.py`), change evidence (`explain.py`, with compact build-input reachability
-in `keygraph.py`), and terminal navigation (`tui.py`
-and `diff_tui.py`). Element inspection lives in
-`inspection.py` and `inspection_tui.py`. Snapshot and diff commands do not import
-Textual. Each interactive inspection owns a cancellable command runner and its
+in `keygraph.py`), target-relative semantic comparison (`semantic.py`), and
+terminal navigation (`tui.py`, `diff_tui.py`, and `semantic_tui.py`). Element inspection lives in
+`inspection.py` and `inspection_tui.py`. Snapshot and noninteractive diff commands
+do not import Textual. Each interactive inspection owns a cancellable command runner and its
 temporary exports; late background results cannot update a closed viewer.
 
 Tests cover parsing, snapshots, comparison filters, scoped graphs, cycles,

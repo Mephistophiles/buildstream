@@ -144,3 +144,36 @@ def test_live_detailed_snapshots(tmp_path, monkeypatch):
     path = tmp_path / "detailed.json"
     write_snapshot(new, path)
     assert read_snapshot(path).as_dict() == new.as_dict()
+
+
+@pytest.mark.skipif(
+    os.environ.get("BST_TREE_TEST_LIVE") != "1", reason="Set BST_TREE_TEST_LIVE=1 with bst/buildbox installed"
+)
+def test_live_semantic_reachability(tmp_path, monkeypatch):
+    from bst_tree.semantic import SemanticDiff, has_semantic_changes
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    project = tmp_path / "project"
+    elements = project / "elements"
+    elements.mkdir(parents=True)
+    (project / "project.conf").write_text(
+        "name: semantic-test\nmin-version: '2.0'\nelement-path: elements\n"
+        "sandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+    )
+    (elements / "lib.bst").write_text("kind: stack\n")
+    (elements / "other.bst").write_text("kind: stack\nruntime-depends:\n- lib.bst\n")
+    (elements / "mid.bst").write_text("kind: stack\nruntime-depends:\n- lib.bst\n")
+    app = elements / "app.bst"
+    app.write_text("kind: stack\nruntime-depends:\n- lib.bst\n- mid.bst\n")
+    targets = ["app.bst", "other.bst"]
+    old = capture(targets, project)
+    app.write_text("kind: stack\nruntime-depends:\n- mid.bst\n")
+    retained = capture(targets, project)
+    comparison = SemanticDiff(old, retained)
+    assert comparison.changes("app.bst") == [{"name": "lib.bst", "change": "retained", "old": ["run"], "new": ["run"]}]
+    assert not has_semantic_changes(comparison.report())
+    (elements / "mid.bst").write_text("kind: stack\n")
+    removed = SemanticDiff(retained, capture(targets, project))
+    assert removed.changes("app.bst")[0]["change"] == "removed"
+    assert removed.changes("other.bst") == []
