@@ -91,7 +91,7 @@ def select(report, element=None, paths=(), follow=True, history=False):
             raise ValueError("Selected entries lack captured history; use bst show --provenance --history")
         result["elements"].append(
             {
-                **data,
+                **{key: value for key, value in data.items() if key != "resolved_inputs"},
                 "entries": [
                     dict({k: v for k, v in by_path[p].items() if history or k != "history"}, selected=p in requested)
                     for p in sorted(selected)

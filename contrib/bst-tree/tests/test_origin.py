@@ -134,11 +134,25 @@ def test_native_serializer_preserves_real_and_synthetic_locations(tmp_path):
     path = tmp_path / "input.yml"
     path.write_text('flags: "%{optimization} -g"\noptimization: -O3\n')
     node = _yaml.load(str(path), path.name)
+    commands = ["\n", "42", "true", "echo\n"]
     result = module.build_report(
         "app",
-        {"vars": node, "env": Node.from_dict({"CFLAGS": "%{flags}"})},
-        {"vars": {"flags": "-O3 -g", "optimization": "-O3"}, "env": {"CFLAGS": "-O3 -g"}},
+        {
+            "vars": node,
+            "env": Node.from_dict({"CFLAGS": "%{flags}"}),
+            "config": Node.from_dict({"commands": commands}),
+        },
+        {
+            "vars": {"flags": "-O3 -g", "optimization": "-O3"},
+            "env": {"CFLAGS": "-O3 -g"},
+            "config": {"commands": commands},
+        },
     )
+    assert json.loads(json.dumps(result))["resolved_inputs"]["config"]["commands"] == commands
+    from ruamel.yaml import YAML
+
+    displayed = YAML(typ="safe").load(_yaml.roundtrip_dump_string(Node.from_dict({"commands": commands})))
+    assert displayed["commands"] != commands  # Reproduces the lossy public YAML display.
     entries = {e["path"]: e for e in result["entries"]}
     assert entries["/vars/flags"]["raw"] == "%{optimization} -g"
     assert entries["/vars/flags"]["value"] == "-O3 -g"

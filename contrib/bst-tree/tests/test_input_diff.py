@@ -139,7 +139,9 @@ def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch):
     import bst_tree.adapter as adapter
 
     calls = []
-    parsed = old.nodes, old.edges, old.details
+    displayed = copy.deepcopy(old.details)
+    displayed["app.bst"]["env"]["CFLAGS"] = None
+    parsed = old.nodes, old.edges, displayed
     monkeypatch.setattr(adapter, "parse_report", lambda *a, **k: parsed)
 
     def run(args, **kwargs):
@@ -147,15 +149,15 @@ def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch):
         if "--version" in args:
             text = "2.8.0"
         elif "--provenance" in args:
-            text = json.dumps(
-                {"format_version": 1, "query": "input-provenance", "elements": list(old.provenance.values())}
-            )
+            elements = [dict(e, resolved_inputs=old.details[name]) for name, e in old.provenance.items()]
+            text = json.dumps({"format_version": 1, "query": "input-provenance", "elements": elements})
         else:
             text = "app.bst"
         return subprocess.CompletedProcess(args, 0, text)
 
     result = capture(["app.bst"], run=run, provenance=True, history=True)
-    assert result.details == old.details and result.provenance == old.provenance
+    assert result.details == old.details
+    assert result.provenance["app.bst"]["entries"] == old.provenance["app.bst"]["entries"]
     assert len(calls) == 5 and sum("--provenance" in call for call in calls) == 1
     assert "--history" in next(call for call in calls if "--provenance" in call)
     count = 0

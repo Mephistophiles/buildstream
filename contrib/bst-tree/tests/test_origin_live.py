@@ -106,6 +106,8 @@ def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path
             main(["snapshot", "app.bst", "-C", str(root), "--provenance", "--history", "-o", str(path), *extra]) == 0
         )
         assert json.loads(path.read_text())["format_version"] == 3
+        saved = json.loads(path.read_text())
+        assert saved["details"]["app.bst"]["config"]["strip-commands"][0] == "\n"
     assert main(["diff", str(before), str(after), "--explain", "--format", "json", "--check"]) == 1
     record = json.loads(capsys.readouterr().out)["explanation"]["records"][0]
     change = next(c for c in record["input_changes"] if c["path"] == "/env/CFLAGS")

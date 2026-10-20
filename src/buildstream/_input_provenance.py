@@ -87,6 +87,10 @@ def build_report(name, raw_nodes, resolved, *, history=None):
         walk(node, [section])
     return {
         "element": name,
+        # The formatted show YAML is intended for display and can fold strings,
+        # coerce scalars, or discard trailing newlines. Preserve exact inputs for
+        # portable provenance snapshots and their resolved-value comparisons.
+        "resolved_inputs": resolved,
         "entries": entries,
         "coverage": "applied-yaml-composition" if history is not None else "winning-composed-inputs",
         "history_available": history is not None,

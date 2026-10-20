@@ -118,6 +118,8 @@ def validate_snapshot_provenance(provenance, nodes, details):
     for name, element in provenance.items():
         if element["element"] != name or type(element.get("history_available")) is not bool:
             raise ValueError("Invalid snapshot provenance element/history coverage")
+        if "resolved_inputs" in element and element["resolved_inputs"] != details[name]:
+            raise ValueError("Snapshot provenance resolved_inputs disagrees with details")
         entries = {entry["path"]: entry for entry in element["entries"]}
         if not set(leaf_paths(details[name])) <= entries.keys():
             raise ValueError("Snapshot provenance does not cover resolved input leaves")

@@ -129,11 +129,19 @@ def capture(targets, directory=None, options=(), run=None, *, detailed=False, pr
             raise ValueError(
                 "Snapshot provenance requires this fork's bst show --provenance. " + str(error)
             ) from error
-        graph.provenance = {element["element"]: element for element in data["elements"]}
+        graph.provenance = {
+            element["element"]: {key: value for key, value in element.items() if key != "resolved_inputs"}
+            for element in data["elements"]
+        }
         if history and any(not e.get("history_available") for e in data["elements"]):
             raise ValueError("Snapshot history requires this fork's rebuilt native node extension")
         # Reject project drift between the graph/details and provenance queries.
         repeated = execute(["show", "--deps", "all", "--order", "alpha", "--format", format_string, "--", *targets])
         if parse_report(repeated, marker, detailed=True) != parsed:
             raise ValueError("Project changed during provenance capture; retry the snapshot")
+        if any(not isinstance(e.get("resolved_inputs"), dict) for e in data["elements"]):
+            raise ValueError("Snapshot provenance requires this fork's lossless resolved_inputs JSON export")
+        # Public show YAML is a display format and may change scalar types or
+        # trailing newlines. Use exact resolved values from the provenance load.
+        graph.details = {e["element"]: e["resolved_inputs"] for e in data["elements"]}
     return Graph.from_dict(graph.as_dict())

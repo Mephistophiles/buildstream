@@ -360,7 +360,9 @@ bst-tree diff before.json after.json --tui
 the rebuilt native extension described under Configuration provenance. Without
 it, winning locations and references are still captured. Provenance is queried
 for the whole selected graph in one invocation. A repeated framed graph/details
-query detects project drift, and every saved provenance value must match the
+query detects project drift. Exact resolved details come from the provenance
+JSON export: ordinary `show` YAML is a display format that can fold strings or
+coerce scalar types. Every saved provenance value must match these lossless
 resolved details. This is not a filesystem transaction; avoid editing the project
 while capturing a snapshot. No build or artifact export is performed.
 
