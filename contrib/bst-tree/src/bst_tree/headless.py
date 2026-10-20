@@ -71,6 +71,7 @@ def project_arguments(sub):
 
 
 def configure_parser(commands):
+    parsers = {}
     descriptions = {
         "tree": "Print a dependency tree from a project or snapshot",
         "rdeps": "Find an element's consumers within the loaded graph",
@@ -110,9 +111,12 @@ def configure_parser(commands):
         if command == "rdeps":
             sub.add_argument("--direct", action="store_true", help="Only immediate consumers (default: transitive)")
         project_arguments(sub)
+        sub.set_defaults(command=command)
+        parsers[command] = sub
     from .headless_inspection import configure_parser as configure_inspection
 
     configure_inspection(commands)
+    return parsers
 
 
 def subset(graph, names, roots, edges=None):

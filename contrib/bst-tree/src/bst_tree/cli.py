@@ -110,7 +110,7 @@ def parser():
     from .artifact_cli import configure_parser
     configure_parser(commands)
     from .headless import configure_parser as configure_headless
-    configure_headless(commands)
+    result.headless_parsers = configure_headless(commands)
     return result
 
 
@@ -150,7 +150,13 @@ class CancellableRunner:
 
 def main(argv=None):
     arguments = parser()
-    args = arguments.parse_args(argv)
+    values = sys.argv[1:] if argv is None else argv
+    if values and values[0] in arguments.headless_parsers:
+        # Parse the selected graph command directly: older argparse versions
+        # otherwise reject targets placed after options following ELEMENT.
+        args = arguments.headless_parsers[values[0]].parse_intermixed_args(values[1:])
+    else:
+        args = arguments.parse_args(values)
     try:
         if args.command in ("tree", "rdeps", "paths"):
             from .headless import run_graph_query

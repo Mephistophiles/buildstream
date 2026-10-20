@@ -348,3 +348,20 @@ def test_corrupt_archive_preview_is_a_clean_error(inspector, monkeypatch, capsys
     result = capsys.readouterr()
     assert not result.out and "corrupt export" in result.err
     assert inspector.instances[-1].cancelled
+
+
+@pytest.mark.parametrize("command,element", [("tree", []), ("rdeps", ["lib"]), ("paths", ["lib"])])
+def test_graph_options_may_precede_or_follow_live_targets(command, element, monkeypatch, capsys):
+    calls = []
+
+    def capture(targets, directory, options, **kwargs):
+        calls.append((targets, directory, options))
+        return graph()
+
+    monkeypatch.setattr("bst_tree.headless.capture", capture)
+    assert (
+        main([command, *element, "-C", "/project", "app", "other", "--format", "json", "--option", "arch", "aarch64"])
+        == 0
+    )
+    assert calls == [(["app", "other"], "/project", [["arch", "aarch64"]])]
+    assert json.loads(capsys.readouterr().out)["query"] == command
