@@ -176,3 +176,29 @@ subprocess cleanup, and `cli.py` handles arguments, provenance and presentation.
 Tests exercise real ripgrep, malformed CLI data, globs, context, unusual filenames,
 partial failure and cancellation. Opt-in live tests cover local sources, patched
 sources, junctions, dependency selection, project options and dirty workspaces.
+
+
+## Shared CAS index
+
+Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
+environment and point it at the actual local BuildStream CAS:
+
+```sh
+python -m pip install ./contrib/bst-cas ./contrib/bst-grep
+export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
+bst-grep --in artifacts --deps run -g '*.h' pthread product.bst
+```
+
+`--cas-directory DIR` also enables CAS mode; `--cas-index FILE` or
+`BST_CAS_INDEX` chooses the shared SQLite database. Its default location is
+`XDG_CACHE_HOME/bst-cas/index.sqlite3`. Trees are reused by artifact files digest;
+current owners come from the live project. Missing or garbage-collected objects
+remain explicit errors/incomplete coverage. CAS mode does not pull artifacts,
+run integration or modify the BuildStream cache.
+
+The new `--in artifacts` mode requires bst-cas and a local CAS directory. It
+searches verified regular-file copies in a private temporary tree, preserving
+paths, hidden files, ripgrep globs and element ownership; target symlinks are not
+followed. Results identify their tree with `origin: cas:HASH/SIZE`. This is an
+artifact search, not a persistent full-text index. Existing source/workspace and
+resolved-config searches remain live and are not cached by artifact digest.

@@ -36,7 +36,7 @@ def nonnegative(value):
 def parser():
     result = argparse.ArgumentParser(
         prog="bst-grep",
-        description="Search BuildStream sources or resolved configuration, retaining element ownership.",
+        description="Search BuildStream sources, resolved configuration or CAS artifact files, retaining element ownership.",
         epilog="Exit status: 0 matches, 1 no matches, 2 error/incomplete search, 130 interrupted. "
         "Source checkout may fetch missing sources; open workspaces are searched directly. "
         "Example: bst-grep --deps all -g '*.{c,h}' pthread app.bst",
@@ -54,9 +54,9 @@ def parser():
     result.add_argument(
         "--in",
         dest="area",
-        choices=("sources", "config"),
+        choices=("sources", "config", "artifacts"),
         default="sources",
-        help="Search source files or resolved config/vars/env (default: sources)",
+        help="Search sources, resolved config/vars/env, or CAS artifact files (default: sources)",
     )
     result.add_argument(
         "--deps",
@@ -96,6 +96,12 @@ def parser():
         "pattern", metavar="PATTERN", help="Ripgrep regex or literal; use -- before leading '-' patterns"
     )
     result.add_argument("targets", nargs="+", metavar="TARGET", help="Elements, including junction-qualified names")
+    result.add_argument(
+        "--cas-directory",
+        default=os.environ.get("BST_CAS_DIRECTORY"),
+        help="Enable shared bst-cas index using this local BuildStream cas directory (or BST_CAS_DIRECTORY)",
+    )
+    result.add_argument("--cas-index", help="Shared SQLite index path (or BST_CAS_INDEX); requires CAS mode")
     return result
 
 
@@ -180,7 +186,7 @@ class Output:
             print(f"{prefix}-{record['line']}-{text}")
 
 
-def run(args, output):
+def _run(args, output, cas):
     for executable in ("rg", "bst"):
         if shutil.which(executable) is None:
             raise ValueError(f"{executable} is missing from PATH")
@@ -188,6 +194,17 @@ def run(args, output):
     validate(command)
     project = Project(args.directory, args.option)
     selected = project.select(args.targets, args.deps, workspaces=args.area == "sources")
+    skipped = []
+    if args.area == "artifacts":
+        kinds = (
+            {r["name"].strip(): r["kind"].strip() for r in project.report(list(selected), ("name", "kind"))}
+            if selected
+            else {}
+        )
+        if kinds.keys() != selected.keys():
+            raise ValueError("Artifact selection changed while loading; retry")
+        skipped = sorted(n for n, kind in kinds.items() if kind in ("stack", "junction"))
+        selected = {n: w for n, w in selected.items() if n not in skipped}
     paths = project.paths(args.targets, args.deps) if args.why else None
     matched_lines, matched_files = 0, set()
     searched = failed = 0
@@ -196,8 +213,15 @@ def run(args, output):
             action = "workspace" if workspace else "source checkout (may fetch)"
             if args.area == "config":
                 action = "resolved configuration"
+            elif args.area == "artifacts":
+                action = "local CAS artifact files"
             print(f"[{index}/{len(selected)}] {safe_text(name)}: {action}", file=sys.stderr)
-        contents = project.sources(name, workspace) if args.area == "sources" else project.configuration(name)
+        if args.area == "artifacts":
+            from bst_cas.integration import artifact_files
+
+            contents = artifact_files(cas, project, name)
+        else:
+            contents = project.sources(name, workspace) if args.area == "sources" else project.configuration(name)
         try:
             with contents as (root, origin):
                 dependency_paths = paths.to(name) if paths is not None else None
@@ -231,9 +255,26 @@ def run(args, output):
             "failed": failed,
             "matched_lines": matched_lines,
             "matched_files": len(matched_files),
+            **({"cas_index": cas.stats(), "skipped": skipped} if cas is not None else {}),
         }
     )
     return 2 if failed else (0 if matched_lines else 1)
+
+
+def run(args, output):
+    if args.area != "artifacts":
+        # Environment configuration alone must not disable normal source search.
+        if args.cas_index:
+            raise ValueError("--cas-index is only used with --in artifacts")
+        return _run(args, output, None)
+    try:
+        from bst_cas.integration import open_index
+    except ImportError as error:
+        raise ValueError(
+            "Artifact search requires bst-cas; install ./contrib/bst-cas in the same environment"
+        ) from error
+    with open_index(args) as cas:
+        return _run(args, output, cas)
 
 
 def main(argv=None):

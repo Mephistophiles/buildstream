@@ -130,7 +130,15 @@ def collect(project, graph, pattern, glob=False):
 
     def inspect(names):
         try:
-            contents = parse_listings(*project.listings(names), names)
+            if getattr(project, "cas_index", None) is not None:
+                from bst_cas import load_artifact
+
+                contents = {}
+                for name in names:
+                    entries, identity = load_artifact(project.cas_index, project, name, graph.nodes[name]["full-key"])
+                    contents[name] = entries
+            else:
+                contents = parse_listings(*project.listings(names), names)
         except (OSError, ValueError) as error:
             if len(names) > 1:
                 # Isolate stale/deleted cache entries without losing good owners.

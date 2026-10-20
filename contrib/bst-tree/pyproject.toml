@@ -12,6 +12,7 @@ license = "Apache-2.0"
 dependencies = ["ruamel.yaml>=0.16.7", "textual>=8.2,<9"]
 
 [project.optional-dependencies]
+cas = ["bst-cas>=0.1,<0.2"]
 test = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [project.scripts]

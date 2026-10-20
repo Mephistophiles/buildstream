@@ -12,6 +12,7 @@ license = "Apache-2.0"
 dependencies = ["ruamel.yaml>=0.16.7"]
 
 [project.optional-dependencies]
+cas = ["bst-cas>=0.1,<0.2"]
 test = ["pytest>=8"]
 live = ["BuildStream>=2.8", "buildstream-plugins>=2"]
 

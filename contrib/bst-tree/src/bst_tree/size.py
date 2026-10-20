@@ -15,6 +15,7 @@
 
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import tarfile
 import tempfile
@@ -30,8 +31,8 @@ from .model import Graph, read_snapshot
 def configure_parser(commands):
     p = commands.add_parser(
         "size",
-        help="Measure artifact files and dependency closures without a CAS index",
-        description="Hash exported artifacts, count shared graph nodes once, and report known/incomplete sizes explicitly.",
+        help="Measure artifact files and dependency closures, optionally using the shared CAS index",
+        description="Read artifact inventories from tar or CAS, count shared graph nodes once, and report incomplete sizes explicitly.",
     )
     p.add_argument("targets", nargs="*", metavar="TARGET")
     p.add_argument("--scope", choices=("all", "run", "build"), default="run")
@@ -52,6 +53,12 @@ def configure_parser(commands):
     )
     project_arguments(p)
     p.set_defaults(command="size")
+    p.add_argument(
+        "--cas-directory",
+        default=os.environ.get("BST_CAS_DIRECTORY"),
+        help="Enable shared bst-cas index using this local BuildStream cas directory (or BST_CAS_DIRECTORY)",
+    )
+    p.add_argument("--cas-index", help="Shared SQLite index path (or BST_CAS_INDEX); requires CAS mode")
     return p
 
 
@@ -157,7 +164,7 @@ def render_size(report):
     return "\n".join(lines)
 
 
-def run_size(args):
+def _run_size(args, cas):
     if args.archive and (args.targets or args.directory or args.option):
         raise ValueError("--archive cannot be combined with live project arguments")
     if args.snapshot and (not args.archive or args.targets or args.directory or args.option):
@@ -193,6 +200,40 @@ def run_size(args):
                     continue
                 path = Path(archives[name]) if name in archives else Path(root) / (str(index) + ".tar")
                 try:
+                    if cas is not None and not args.archive:
+                        from bst_cas import load_artifact
+
+                        class Project:
+                            def report(self, targets, fields):
+                                output = runner(
+                                    command_base(args.directory, args.option)
+                                    + [
+                                        "show",
+                                        "--deps",
+                                        "none",
+                                        "--format",
+                                        "%{full-key}\n%{artifact-cas-digest}",
+                                        "--",
+                                        *targets,
+                                    ]
+                                ).stdout
+                                lines = output.strip().splitlines()
+                                if len(lines) != 2:
+                                    raise ValueError(
+                                        "Expected an artifact key and CAS digest; artifact may be unavailable"
+                                    )
+                                return [dict(zip(fields, lines))]
+
+                        entries, identity = load_artifact(cas, Project(), name, node["key"])
+                        manifests[name] = {
+                            entry["path"].lstrip("/"): {
+                                "type": entry["kind"],
+                                "size": entry["size"],
+                                "sha256": entry.get("digest", "").split("/")[0],
+                            }
+                            for entry in entries
+                        }
+                        continue
                     if not args.archive:
                         runner(
                             command_base(args.directory, args.option)
@@ -224,6 +265,8 @@ def run_size(args):
                         path.unlink(missing_ok=True)
         report = size_report(graph, manifests, errors)
         report["scope"] = args.scope
+        if cas is not None:
+            report["coverage"]["cas_index"] = cas.stats()
         print(
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
             if args.format == "json"
@@ -235,3 +278,16 @@ def run_size(args):
     finally:
         cancelled.set()
         runner.cancel()
+
+
+def run_size(args):
+    if args.cas_index and not args.cas_directory:
+        raise ValueError("--cas-index requires --cas-directory or BST_CAS_DIRECTORY")
+    if not args.cas_directory or args.archive:
+        return _run_size(args, None)
+    try:
+        from bst_cas.integration import open_index
+    except ImportError as error:
+        raise ValueError("CAS mode requires bst-cas; install ./contrib/bst-cas in the same environment") from error
+    with open_index(args) as cas:
+        return _run_size(args, cas)

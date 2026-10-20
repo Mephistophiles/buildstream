@@ -76,6 +76,12 @@ def parser():
         "path", metavar="PATH", help="Artifact-root path, e.g. /usr/lib/libc++.so; leading / is optional"
     )
     result.add_argument("targets", nargs="+", metavar="TARGET", help="Elements, including junction-qualified names")
+    result.add_argument(
+        "--cas-directory",
+        default=os.environ.get("BST_CAS_DIRECTORY"),
+        help="Enable shared bst-cas index using this local BuildStream cas directory (or BST_CAS_DIRECTORY)",
+    )
+    result.add_argument("--cas-index", help="Shared SQLite index path (or BST_CAS_INDEX); requires CAS mode")
     return result
 
 
@@ -158,11 +164,12 @@ class Output:
         print()
 
 
-def run(args, output):
+def _run(args, output, cas):
     pattern = normalize_path(args.path)
     if shutil.which("bst") is None:
         raise ValueError("bst is missing from PATH")
     project = Project(args.directory, args.option)
+    project.cas_index = cas
     graph = project.graph(args.targets, args.deps)
     if sys.stderr.isatty():
         print("Inspecting locally cached artifacts...", file=sys.stderr)
@@ -183,8 +190,23 @@ def run(args, output):
             for owner in owners:
                 owner["commands"] = project.commands(owner["element"])
         output.emit(describe(path, owners, compared=comparing, text=args.diff))
+    if cas is not None:
+        coverage["cas_index"] = cas.stats()
     output.emit({"type": "summary", "matched_paths": len(index), "coverage": coverage})
     return 2 if not coverage["complete"] else (0 if index else 1)
+
+
+def run(args, output):
+    if args.cas_index and not args.cas_directory:
+        raise ValueError("--cas-index requires --cas-directory or BST_CAS_DIRECTORY")
+    if not args.cas_directory:
+        return _run(args, output, None)
+    try:
+        from bst_cas.integration import open_index
+    except ImportError as error:
+        raise ValueError("CAS mode requires bst-cas; install ./contrib/bst-cas in the same environment") from error
+    with open_index(args) as cas:
+        return _run(args, output, cas)
 
 
 def main(argv=None):

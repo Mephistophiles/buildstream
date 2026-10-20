@@ -158,7 +158,8 @@ unqualified name in different junctions are queried in separate batches so their
 headers cannot mix owners. Paired plain/long listings preserve filenames with
 spaces or ` -> `; inconsistent or unsupported output fails explicitly. Human
 BuildStream listing output cannot reliably represent line-break filenames; they
-are unsupported. There is no persistent index or dependency on private CAS APIs.
+are unsupported. This default mode has no persistent index or dependency on private CAS APIs.
+Optional direct CAS mode uses the shared persistent index described below.
 
 ```sh
 python -m pip install -e './contrib/bst-blame[test]'
@@ -169,3 +170,27 @@ python -m pytest -c contrib/bst-blame/pyproject.toml contrib/bst-blame/tests
 python -m pip install -e './contrib/bst-blame[test,live]'
 BST_BLAME_TEST_LIVE=1 python -m pytest -c contrib/bst-blame/pyproject.toml contrib/bst-blame/tests
 ```
+
+
+## Shared CAS index
+
+Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
+environment and point it at the actual local BuildStream CAS:
+
+```sh
+python -m pip install ./contrib/bst-cas ./contrib/bst-blame
+export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
+bst-blame /usr/lib/libc++.so product.bst --compare-content --json
+```
+
+`--cas-directory DIR` also enables CAS mode; `--cas-index FILE` or
+`BST_CAS_INDEX` chooses the shared SQLite database. Its default location is
+`XDG_CACHE_HOME/bst-cas/index.sqlite3`. Trees are reused by artifact files digest;
+current owners come from the live project. Missing or garbage-collected objects
+remain explicit errors/incomplete coverage. CAS mode does not pull artifacts,
+run integration or modify the BuildStream cache.
+
+Ownership queries read CAS inventories instead of paired human-formatted file
+listings. `--compare-content` and `--diff` verify/read CAS blobs directly, with no
+tar export. Multiple owners remain explicit even when they share a tree digest.
+`coverage.cas_index` includes reuse statistics.

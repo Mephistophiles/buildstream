@@ -103,11 +103,35 @@ control characters; JSON contains no ANSI codes. `--timeout` defaults to 120 sec
 per bst command and kills the process group. Metadata output is bounded to 32 MiB
 per stream. `--max-elf-size` defaults to 512 MiB per ELF; `--max-contexts` defaults
 to 10000 and reports incomplete analysis if exceeded. Archive disk usage and
-non-ELF file counts are not capped. Large artifacts still require tar export;
-persistent indexing and direct CAS access are deliberately not implemented.
+non-ELF file counts are not capped. By default, large artifacts require tar export. Optional direct CAS mode
+reuses the shared persistent inventory and per-file ELF analysis cache.
 
 Development: `pip install './contrib/bst-elf[test]'`, then
 `pytest -c contrib/bst-elf/pyproject.toml contrib/bst-elf/tests`.
 The tests compile small real ELF files using `cc`, but never execute them.
 Set `BST_ELF_TEST_LIVE=1` with BuildStream/buildbox installed for real cached-artifact
 integration tests. CI runs these on Python 3.10 and 3.14.
+
+
+## Shared CAS index
+
+Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
+environment and point it at the actual local BuildStream CAS:
+
+```sh
+python -m pip install ./contrib/bst-cas ./contrib/bst-elf
+export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
+bst-elf product.bst --path /usr/bin/app --json
+```
+
+`--cas-directory DIR` also enables CAS mode; `--cas-index FILE` or
+`BST_CAS_INDEX` chooses the shared SQLite database. Its default location is
+`XDG_CACHE_HOME/bst-cas/index.sqlite3`. Trees are reused by artifact files digest;
+current owners come from the live project. Missing or garbage-collected objects
+remain explicit errors/incomplete coverage. CAS mode does not pull artifacts,
+run integration or modify the BuildStream cache.
+
+Static ELF metadata is cached per file digest and parser version; dependency
+resolution still runs against the current selected graph and loader profile.
+`coverage.cas_index` includes reuse statistics. Offline `--archive` inputs
+continue to scan the specified tar archives.

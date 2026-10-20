@@ -66,6 +66,20 @@ def inspect_archive(stream, wanted, *, text=False):
 
 
 def fingerprints(project, name, wanted, *, text=False):
+    if getattr(project, "cas_index", None) is not None:
+        result = {}
+        for path, owner in wanted.items():
+            with project.cas_index.blob(owner["digest"]) as stream:
+                record = {"sha256": owner["digest"].split("/")[0]}
+                if text and owner["size"] <= TEXT_LIMIT:
+                    content = stream.read()
+                    if b"\x00" not in content:
+                        try:
+                            record["_text"] = content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            pass
+                result[path] = record
+        return result
     with child(project.checkout_command(name), binary=True) as (process, diagnostics):
         result = inspect_archive(process.stdout, wanted, text=text)
         # tar readers stop at their end marker. Drain the remaining block padding

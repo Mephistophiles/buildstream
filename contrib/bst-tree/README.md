@@ -597,7 +597,8 @@ bst-tree artifact-diff old.tar new.tar --archives --bloaty --bloaty-sources sect
 
 `size` reads each selected artifact once, hashing regular contents in a temporary
 checkout tar without integration or builds. Live checkout may retrieve missing
-data from configured artifact remotes; no CAS index is read or maintained.
+data from configured artifact remotes. Optional direct CAS mode uses the shared
+persistent index instead of exporting tar files (see below).
 `--scope` defaults to `run` and matches the graph browser, retaining roots in build
 scope. Offline archives can be independent roots, or associated with exact element
 names in a saved graph. Missing archives/failed exports are explicitly incomplete;
@@ -682,3 +683,27 @@ The existing per-command timeout and output bounds apply. Native backend tests
 cover composed includes, overrides, conditional options, references and unchanged
 ordinary `bst show`; CI tests the fork's pure Python changes against the released
 BuildStream compiled runtime on Python 3.10/3.14.
+
+
+## Shared CAS index
+
+Install the optional [bst-cas](../bst-cas/README.md) project in this tool's
+environment and point it at the actual local BuildStream CAS:
+
+```sh
+python -m pip install ./contrib/bst-cas ./contrib/bst-tree
+export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
+bst-tree size product.bst --format json
+```
+
+`--cas-directory DIR` also enables CAS mode; `--cas-index FILE` or
+`BST_CAS_INDEX` chooses the shared SQLite database. Its default location is
+`XDG_CACHE_HOME/bst-cas/index.sqlite3`. Trees are reused by artifact files digest;
+current owners come from the live project. Missing or garbage-collected objects
+remain explicit errors/incomplete coverage. CAS mode does not pull artifacts,
+run integration or modify the BuildStream cache.
+
+CAS mode currently applies to `size`. It uses logical file sizes and SHA-256 CAS
+digests for content uniqueness; it does not measure compressed or reclaimable
+CAS disk space. `coverage.cas_index` includes reuse statistics. Offline archive
+inputs and artifact comparison continue to use their existing archive readers.

@@ -15,6 +15,7 @@
 
 import argparse
 import json
+import os
 import math
 from pathlib import Path
 import sys
@@ -22,6 +23,7 @@ import tarfile
 import tempfile
 
 from .archive import path_name, scan
+from .elf import read_elf
 from .process import CommandRunner
 from .project import Project
 from .resolve import Resolver, load_profile
@@ -88,10 +90,16 @@ def parser():
     p.add_argument("--format", choices=("text", "json"), default="text")
     p.add_argument("--json", dest="format", action="store_const", const="json")
     p.add_argument("--check", action="store_true", help="Exit 1 for findings; incomplete/error always exits 2")
+    p.add_argument(
+        "--cas-directory",
+        default=os.environ.get("BST_CAS_DIRECTORY"),
+        help="Enable shared bst-cas index using this local BuildStream cas directory (or BST_CAS_DIRECTORY)",
+    )
+    p.add_argument("--cas-index", help="Shared SQLite index path (or BST_CAS_INDEX); requires CAS mode")
     return p
 
 
-def collect(args, runner):
+def collect(args, runner, cas=None):
     entries = []
     coverage = {"selected": 0, "inspected": 0, "missing": [], "skipped": [], "errors": [], "complete": False}
     if args.archive and (args.targets or args.directory or args.option):
@@ -128,7 +136,22 @@ def collect(args, runner):
     with tempfile.TemporaryDirectory(prefix="bst-elf-") as directory:
         for index, (owner, archive) in enumerate(inputs):
             try:
-                if project:
+                if project and cas is not None:
+                    from bst_cas import load_artifact
+                    from bst_cas.integration import elf_entries
+                    import elftools
+
+                    manifest, identity = load_artifact(cas, project, owner, graph.nodes[owner]["full-key"])
+                    before = [identity]
+                    records, errors = elf_entries(
+                        cas,
+                        manifest,
+                        owner,
+                        read_elf,
+                        "bst-elf-v1:pyelftools-" + elftools.__version__,
+                        args.max_elf_size,
+                    )
+                elif project:
                     archive = Path(directory) / (str(index) + ".tar")
                     before = project.report([owner], ("full-key", "artifact-cas-digest"))
                     if len(before) != 1:
@@ -150,7 +173,8 @@ def collect(args, runner):
                         raise ValueError("Artifact identity changed during export; retry")
                     if before[0]["full-key"].strip() != graph.nodes[owner]["full-key"]:
                         raise ValueError("Project key changed during scan; retry")
-                records, errors = scan(archive, owner, max_elf_size=args.max_elf_size)
+                if cas is None or not project:
+                    records, errors = scan(archive, owner, max_elf_size=args.max_elf_size)
                 if graph:
                     for record in records:
                         record.update(
@@ -217,9 +241,22 @@ def render(report):
 def main(argv=None):
     args = parser().parse_intermixed_args(argv)
     runner = CommandRunner()
+    cas = None
     try:
+        if args.cas_index and not args.cas_directory:
+            raise ValueError("--cas-index requires --cas-directory or BST_CAS_DIRECTORY")
+        if args.cas_directory and not args.archive:
+            try:
+                from bst_cas.integration import open_index
+            except ImportError as error:
+                raise ValueError(
+                    "CAS mode requires bst-cas; install ./contrib/bst-cas in the same environment"
+                ) from error
+            cas = open_index(args)
         profile = load_profile(args.profile, args.library_path)
-        entries, coverage = collect(args, runner)
+        entries, coverage = collect(args, runner, cas)
+        if cas is not None:
+            coverage["cas_index"] = cas.stats()
         try:
             contexts, findings, errors = Resolver(entries, profile).audit(
                 [path_name(p) for p in args.path], args.expect_machine, args.max_contexts
@@ -262,6 +299,8 @@ def main(argv=None):
         return 2
     finally:
         runner.cancel()
+        if cas is not None:
+            cas.close()
 
 
 if __name__ == "__main__":
