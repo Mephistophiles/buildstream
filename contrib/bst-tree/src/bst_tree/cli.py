@@ -58,7 +58,7 @@ def parser():
                              help="Browse saved JSON without bst; cannot be combined with project arguments")
         else:
             sub.add_argument("-o", "--output", required=True, metavar="FILE",
-                             help="Output JSON snapshot; replaces an existing file")
+                             help="Output JSON snapshot; - writes stdout, otherwise replaces an existing file")
             sub.add_argument("--details", action="store_true",
                              help="Capture resolved config, variables, environment and public data for change analysis")
     diff = commands.add_parser(
@@ -109,6 +109,8 @@ def parser():
     diff.add_argument("--check", action="store_true", help="Exit 1 when the selected comparison has changes")
     from .artifact_cli import configure_parser
     configure_parser(commands)
+    from .headless import configure_parser as configure_headless
+    configure_headless(commands)
     return result
 
 
@@ -150,6 +152,12 @@ def main(argv=None):
     arguments = parser()
     args = arguments.parse_args(argv)
     try:
+        if args.command in ("tree", "rdeps", "paths"):
+            from .headless import run_graph_query
+            return run_graph_query(args)
+        if args.command == "inspect":
+            from .headless_inspection import run_inspection
+            return run_inspection(args)
         if args.command == "artifact-diff":
             from .artifact_cli import run_artifact_diff
             return run_artifact_diff(args)
@@ -223,7 +231,11 @@ def main(argv=None):
             )
             return 1 if args.check and has_changes(delta) else 0
         if args.command == "snapshot":
-            write_snapshot(capture(args.targets, args.directory, args.option, detailed=args.details), args.output)
+            graph = capture(args.targets, args.directory, args.option, detailed=args.details)
+            if args.output == "-":
+                print(json.dumps(graph.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                write_snapshot(graph, args.output)
             return 0
         if args.snapshot and (args.targets or args.directory or args.option):
             arguments.error("--snapshot cannot be combined with project arguments")

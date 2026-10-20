@@ -181,7 +181,7 @@ def test_live_semantic_reachability(tmp_path, monkeypatch):
 @pytest.mark.skipif(
     os.environ.get("BST_TREE_TEST_LIVE") != "1", reason="Set BST_TREE_TEST_LIVE=1 with bst/buildbox installed"
 )
-def test_live_artifact_comparison(tmp_path, monkeypatch):
+def test_live_artifact_comparison(tmp_path, monkeypatch, capsys):
     from bst_tree.artifacts import ArtifactComparison
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
@@ -224,5 +224,68 @@ def test_live_artifact_comparison(tmp_path, monkeypatch):
         finally:
             session.close()
         assert not session.root.exists()
+
+        # Exercise the installed public CLI contract through every headless query.
+        from bst_tree.cli import main
+        import json
+
+        (elements / "app.bst").write_text("kind: manual\nruntime-depends:\n- import.bst\n")
+        for command, arguments in (
+            ("tree", ["app.bst"]),
+            ("rdeps", ["import.bst", "app.bst"]),
+            ("paths", ["import.bst", "app.bst"]),
+        ):
+            capsys.readouterr()
+            assert main([command, *arguments, "-C", str(project), "--format", "json"]) == 0
+            report = json.loads(capsys.readouterr().out)
+            assert report["query"] == command
+            if command == "rdeps":
+                assert report["consumers"] == ["app.bst"]
+            elif command == "paths":
+                assert report["paths"][0]["nodes"] == ["app.bst", "import.bst"]
+        assert main(["inspect", "import.bst", "-C", str(project), "--format", "json"]) == 0
+        assert "config" in json.loads(capsys.readouterr().out)["details"]
+        assert (
+            main(
+                [
+                    "inspect",
+                    "import.bst",
+                    "-C",
+                    str(project),
+                    "--section",
+                    "sources",
+                    "--checkout",
+                    "--files",
+                    "--path",
+                    "import/config",
+                    "--format",
+                    "json",
+                ]
+            )
+            == 0
+        )
+        sources = json.loads(capsys.readouterr().out)
+        assert sources["origin"] == "checkout"
+        assert sources["preview"]["text"] == "new\n"
+        assert "import/config" in [f["path"] for f in sources["files"]]
+        assert (
+            main(
+                [
+                    "inspect",
+                    "import.bst",
+                    "-C",
+                    str(project),
+                    "--section",
+                    "artifacts",
+                    "--path",
+                    "config",
+                    "--format",
+                    "json",
+                ]
+            )
+            == 0
+        )
+        artifact = json.loads(capsys.readouterr().out)
+        assert artifact["preview"]["text"] == "new\n" and artifact["pulled"] is False
     finally:
         inspector.cancel()

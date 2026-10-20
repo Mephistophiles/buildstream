@@ -32,6 +32,10 @@ To update from a changed checkout, run `pipx install --force ./contrib/bst-tree`
 | `diff OLD NEW` | Compare saved graphs as text or JSON | Neither `bst` nor a terminal required |
 | `diff OLD NEW --tui` | Inspect changes and dependency candidates interactively | A terminal; no `bst` required |
 | `artifact-diff OLD NEW` | Compare artifact files, metadata, ABI and nested formats | Working `bst`, or two local tar archives with `--archives`; analyzers optional |
+| `tree TARGET...` | Print dependencies, optionally filtering names with `--match` | Working `bst`, or a saved graph with `--snapshot` |
+| `rdeps ELEMENT TARGET...` | Print direct or transitive consumers in the loaded graph | Working `bst`, or a saved graph with `--snapshot` |
+| `paths ELEMENT TARGET...` | Print one shortest path per target to an element | Working `bst`, or a saved graph with `--snapshot` |
+| `inspect ELEMENT` | Read effective configuration, source provenance or artifact files | Working `bst` and project plugins |
 
 Live `browse` and `snapshot` require at least one explicit target. `-C` defaults
 to the current directory. Multiple targets, junction-qualified names, and repeated
@@ -48,7 +52,8 @@ bst-tree diff before.json after.json --format json --check
 bst-tree browse --snapshot before.json
 ```
 
-Snapshot writes are atomic and **replace an existing output file**. Snapshots
+Snapshot writes are atomic and **replace an existing output file**; `-o -` writes
+JSON to stdout instead. Snapshots
 always contain the full graph; changing the UI scope does not modify the snapshot.
 Use `bst-tree --help` or `bst-tree COMMAND --help` for argument descriptions.
 
@@ -485,3 +490,96 @@ Reports distinguish tool failure, timeout, unavailable tools and reported change
 Normal success exits 0; `--check` exits 1 for selected inventory or analyzer
 changes. Requested analysis errors exit 2 even without `--check`; cancellation
 exits 130. `--check` measures all selected file changes, not ABI compatibility alone.
+
+## Headless queries and inspection
+
+`tree`, `rdeps`, `paths` and `inspect` do not require a TTY or import Textual.
+Their default is plain text; `--format json` produces one JSON document on stdout.
+BuildStream diagnostics and errors go to stderr. Exit statuses are 0 for a
+successful query (including an empty result), 2 for errors and 130 for cancellation.
+Existing `diff` and `artifact-diff` also support headless text/JSON and `--check`.
+
+```sh
+bst-tree tree app.bst sdk.bst -C /project --scope build
+bst-tree tree app.bst -C /project --match llvm --format json
+bst-tree rdeps lib.bst app.bst sdk.bst -C /project --format json
+bst-tree rdeps lib.bst app.bst -C /project --direct
+bst-tree paths lib.bst app.bst -C /project --scope run --format json
+
+# Offline queries need neither bst nor the original project:
+bst-tree tree --snapshot graph.json
+bst-tree rdeps lib.bst --snapshot graph.json --format json
+bst-tree paths lib.bst --snapshot graph.json
+bst-tree snapshot app.bst -C /project -o - | bst-tree tree --snapshot - --format json
+```
+
+Live queries require explicit graph roots (`TARGET...`), with repeated
+`--option NAME VALUE` and strict mode. Offline `--snapshot FILE` replaces those
+roots and cannot be combined with live targets, `-C` or project options. `-` reads
+stdin. An `ELEMENT` query uses its exact name in the loaded graph, including any
+junction qualification. An unknown element is an error. An element excluded by
+`--scope` produces an empty result with `in_scope: false` in JSON.
+
+Scopes match the TUI: `all` includes the complete loaded graph; `run` follows
+runtime dependencies; `build` includes each root's direct build dependencies and
+their runtime closure, retaining the roots themselves. `rdeps` is limited to the
+selected roots' loaded graph and scope; it does not discover consumers elsewhere
+in the project. Its default is transitive; `--direct` includes only immediate
+consumers and edges to the queried element. `paths` returns one shortest path per
+reachable root, with deterministic choices when several paths are equally short.
+It does not enumerate every possible route. `tree --match TEXT` searches names
+case-insensitively and retains matching nodes plus ancestor context. Shared
+subtrees and cycles are expanded once in text output.
+
+Query JSON uses its own `format_version: 1` and `query` field. `tree` and `rdeps`
+include `roots` and a flat `graph` object (`nodes`, `edges`, metadata and any saved
+details); the edge direction remains **consumer → dependency**, even for `rdeps`.
+`rdeps.consumers` excludes the queried element itself. `paths.paths` contains
+`target`, `nodes` and typed `edges` for each witness. Empty query graphs are valid
+results, not snapshots to pass back to `browse --snapshot`. Use `snapshot` to
+produce a complete portable graph.
+
+```sh
+bst-tree inspect app.bst -C /project --format json
+bst-tree inspect app.bst -C /project --section sources --format json
+bst-tree inspect app.bst -C /project --section sources --files --path .config
+bst-tree inspect app.bst -C /project --section sources --checkout --files --path app/main.c
+bst-tree inspect app.bst -C /project --section artifacts --path usr/share/app.conf --format json
+bst-tree inspect app.bst -C /project --section artifacts --pull --format json
+```
+
+`inspect --section build` (the default) returns structured effective `config`,
+`vars`, `env` and `public` data, without executing build commands. `sources`
+returns provenance and workspace location. `--files` lists a workspace, including
+hidden files; symlinks are listed with targets but not traversed. `--path` previews
+an exact relative regular-file path without following links. Without an open
+workspace, request `--checkout` explicitly to create a temporary source checkout
+with build scripts. It may fetch sources; scripts are not executed, and the
+checkout is removed after success, error or cancellation. `--checkout` also lets
+you request a temporary checkout when a workspace is open; JSON identifies the
+chosen origin without presenting a removed temporary path as a persistent workspace.
+Paths are relative to the listed tree. A temporary checkout preserves BuildStream's
+layout: sources live under the normalized element directory (for example,
+`app/main.c`) and generated build scripts live at the checkout root. Run `--files`
+first to discover exact paths, especially for junction-qualified elements.
+
+`artifacts` lists the selected artifact's paths and long metadata, with no
+automatic pull. `--pull` explicitly downloads only this element without its
+dependencies before listing. `--path` exports a temporary artifact tar for preview
+without integration or builds; checkout may retrieve missing data through
+configured artifact remotes. Archive links and special files are not followed.
+The temporary archive is removed when inspection finishes. `--checkout` is valid
+only for sources, and `--pull` only for artifacts.
+
+Inspection JSON also uses `format_version: 1`, with `query: "inspect"`, `element`
+and `section`. Preview objects contain `path`, `text` (null for binary content),
+`binary`, `truncated` and `limit_bytes`; truncation never needs to be inferred
+from human-readable text. `--limit BYTES` defaults to 256 KiB. Source listings have
+structured type/mode/size fields; artifact listings preserve BuildStream's long
+metadata in `details`, alongside `path` and `directory`.
+
+All four commands accept `--timeout SECONDS` (default 120 per bst invocation)
+and `--output-limit BYTES` (default 32 MiB per captured stream). Overflow is an
+error rather than a silently partial graph or inspection. Cancellation and timeout
+terminate the owned subprocess group. These limits do not cap the size of a saved
+graph read from disk or stdin, or the number of source files listed locally.

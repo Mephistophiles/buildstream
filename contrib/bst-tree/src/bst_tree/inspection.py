@@ -62,7 +62,7 @@ class ProjectInspector:
         for temporary, _ in archives.values():
             temporary.cleanup()
 
-    def preview_artifact(self, name, path, limit=256 * 1024):
+    def preview_artifact(self, name, path, limit=256 * 1024, *, structured=False):
         """Export once per viewer; read regular members without extracting them."""
         member_path = PurePosixPath(path)
         if member_path.is_absolute() or ".." in member_path.parts:
@@ -92,7 +92,7 @@ class ProjectInspector:
                     raise
             else:
                 _, archive = cached
-            return preview_archive(archive, member_path.as_posix(), limit)
+            return preview_archive(archive, member_path.as_posix(), limit, structured=structured)
 
     def pull_artifact(self, name):
         """Download this element, discard old previews and reload its listing."""
@@ -191,7 +191,7 @@ class ProjectInspector:
         raise ValueError(f"Unknown inspection section: {section}")
 
 
-def preview_file(root, path, limit=256 * 1024):
+def preview_file(root, path, limit=256 * 1024, *, structured=False):
     """Bounded UTF-8 preview; never follow a link outside the workspace."""
     root, path = Path(root).resolve(), Path(path).resolve()
     if not path.is_relative_to(root):
@@ -199,10 +199,10 @@ def preview_file(root, path, limit=256 * 1024):
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError("Only regular files can be previewed")
     with path.open("rb") as stream:
-        return preview_stream(stream, limit)
+        return preview_stream(stream, limit, structured=structured)
 
 
-def preview_archive(archive, path, limit=256 * 1024):
+def preview_archive(archive, path, limit=256 * 1024, *, structured=False):
     with tarfile.open(archive, "r:") as bundle:
         try:
             member = bundle.getmember("./" + path)
@@ -215,11 +215,19 @@ def preview_archive(archive, path, limit=256 * 1024):
         if not member.isfile():
             raise ValueError("Only regular files can be previewed; links are not followed")
         with bundle.extractfile(member) as stream:
-            return preview_stream(stream, limit)
+            return preview_stream(stream, limit, structured=structured)
 
 
-def preview_stream(stream, limit):
+def preview_stream(stream, limit, *, structured=False):
     content = stream.read(limit + 1)
+    if structured:
+        binary = b"\x00" in content
+        return {
+            "text": None if binary else content[:limit].decode("utf-8", errors="replace"),
+            "binary": binary,
+            "truncated": len(content) > limit,
+            "limit_bytes": limit,
+        }
     if b"\x00" in content:
         return "Binary file; text preview unavailable."
     text = content[:limit].decode("utf-8", errors="replace")
