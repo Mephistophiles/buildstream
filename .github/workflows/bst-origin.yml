@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '${{ matrix.python }}'
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap gcc
-      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0' 'Cython>=3.1' pytest-datafiles
+      - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0' 'Cython>=3.1' setuptools pytest-datafiles
       - name: Compile fork node extension and overlay fork Python modules
         run: |
           python contrib/bst-tree/tests/build_origin_runtime.py "$RUNNER_TEMP/bst-origin-runtime"
@@ -28,4 +28,4 @@ jobs:
         env:
           BST_TREE_TEST_ORIGIN: "1"
       - name: Existing native YAML regression suite without history enabled
-        run: python -m pytest -c contrib/bst-tree/pyproject.toml tests/internals/yaml.py
+        run: python -m pytest -c contrib/bst-tree/pyproject.toml --basetemp "$RUNNER_TEMP/bst-origin-yaml-tests" tests/internals/yaml.py
