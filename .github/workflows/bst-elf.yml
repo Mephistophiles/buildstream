@@ -1,0 +1,25 @@
+name: bst-elf
+on:
+  push:
+    paths: ['contrib/bst-elf/**', '.github/workflows/bst-elf.yml']
+  pull_request:
+    paths: ['contrib/bst-elf/**', '.github/workflows/bst-elf.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '${{ matrix.python }}'
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap gcc
+      - run: python -m pip install './contrib/bst-elf[test,live]' 'BuildStream==2.8.0'
+      - run: python -m pytest -c contrib/bst-elf/pyproject.toml contrib/bst-elf/tests
+        env:
+          BST_ELF_TEST_LIVE: "1"
