@@ -113,3 +113,34 @@ def test_live_buildstream(tmp_path, monkeypatch):
             inspector.cancel()
         finally:
             server.stop(0).wait()
+
+
+@pytest.mark.skipif(
+    os.environ.get("BST_TREE_TEST_LIVE") != "1", reason="Set BST_TREE_TEST_LIVE=1 with bst/buildbox installed"
+)
+def test_live_detailed_snapshots(tmp_path, monkeypatch):
+    from bst_tree.explain import analyze
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    elements = tmp_path / "project" / "elements"
+    elements.mkdir(parents=True)
+    (elements.parent / "project.conf").write_text(
+        "name: explain-test\nmin-version: '2.0'\nelement-path: elements\n"
+        "sandbox:\n  build-os: linux\n  build-arch: aarch64\n"
+    )
+    (elements / "app.bst").write_text("kind: manual\nbuild-depends:\n- tool.bst\n")
+    tool = elements / "tool.bst"
+    template = "kind: manual\nvariables:\n  flags: '{}'\nenvironment:\n  CFLAGS: '%{{flags}}'\nconfig:\n  build-commands:\n  - echo %{{flags}}\n"
+    tool.write_text(template.format("-O2"))
+    old = capture(["app.bst"], elements.parent, detailed=True)
+    tool.write_text(template.format("-O3"))
+    new = capture(["app.bst"], elements.parent, detailed=True)
+    assert old.details["tool.bst"]["env"]["CFLAGS"] == "-O2"
+    assert new.details["tool.bst"]["config"]["build-commands"] == ["echo -O3"]
+    result = {r["name"]: r for r in analyze(old, new)["records"]}
+    assert result["tool.bst"]["category"] == "local"
+    assert result["app.bst"]["category"] == "dependency"
+    path = tmp_path / "detailed.json"
+    write_snapshot(new, path)
+    assert read_snapshot(path).as_dict() == new.as_dict()

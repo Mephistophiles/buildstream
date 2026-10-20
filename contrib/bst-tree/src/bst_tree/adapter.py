@@ -20,12 +20,12 @@ import uuid
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from .model import Graph
+from .model import DETAIL_FIELDS, Graph
 
 FIELDS = ("name", "kind", "full-key", "source-info", "workspaced", "build-deps", "runtime-deps")
 
 
-def parse_report(report, marker):
+def parse_report(report, marker, *, detailed=False):
     yaml = YAML(typ="safe")
 
     def load_yaml(value):
@@ -34,18 +34,19 @@ def parse_report(report, marker):
         except YAMLError as error:
             raise ValueError(f"Malformed YAML in bst show output: {error}") from error
 
-    nodes, edges = {}, {}
+    nodes, edges, details = {}, {}, {}
+    fields = FIELDS + DETAIL_FIELDS if detailed else FIELDS
     sections = report.split(marker + "record\n")
     if sections[0].strip():
         raise ValueError("Unexpected output before bst show records")
     for section in sections[1:]:
         values = {}
-        for index, field in enumerate(FIELDS):
+        for index, field in enumerate(fields):
             prefix = marker + field + "\n"
             if not section.startswith(prefix):
                 raise ValueError(f"Malformed bst show field: {field}")
             section = section[len(prefix) :]
-            following = marker + (FIELDS[index + 1] if index + 1 < len(FIELDS) else "end") + "\n"
+            following = marker + (fields[index + 1] if index + 1 < len(fields) else "end") + "\n"
             value, separator, remainder = section.partition(following)
             if not separator or marker in value:
                 raise ValueError(f"Missing bst show boundary for {field}")
@@ -67,13 +68,21 @@ def parse_report(report, marker):
             "source_info": source_info or None,
             "workspace": bool(values["workspaced"]),
         }
+        if detailed:
+            details[name] = {}
+            for field in DETAIL_FIELDS:
+                value = load_yaml(values[field])
+                if value is not None and not isinstance(value, dict):
+                    raise ValueError(f"Expected mapping for {name}: {field}")
+                details[name][field] = {} if value is None else value
         for field, kind in (("build-deps", "build"), ("runtime-deps", "run")):
             dependencies = load_yaml(values[field])
             if not isinstance(dependencies, list) or any(not isinstance(d, str) for d in dependencies):
                 raise ValueError(f"Expected dependency list for {name}")
             for dependency in dependencies:
                 edges.setdefault((name, dependency), set()).add(kind)
-    return nodes, {edge: frozenset(kinds) for edge, kinds in edges.items()}
+    result = nodes, {edge: frozenset(kinds) for edge, kinds in edges.items()}
+    return (*result, details) if detailed else result
 
 
 def command_base(directory=None, options=()):
@@ -85,7 +94,7 @@ def command_base(directory=None, options=()):
     return base
 
 
-def capture(targets, directory=None, options=(), run=subprocess.run):
+def capture(targets, directory=None, options=(), run=subprocess.run, *, detailed=False):
     base = command_base(directory, options)
 
     def execute(arguments):
@@ -97,13 +106,15 @@ def capture(targets, directory=None, options=(), run=subprocess.run):
     version = execute(["--version"]).strip()
     marker = "BST_TREE_" + uuid.uuid4().hex + "_"
     format_string = marker + "record\n"
-    for field in FIELDS:
+    for field in FIELDS + DETAIL_FIELDS if detailed else FIELDS:
         format_string += marker + field + "\n%{" + field + "}\n"
     format_string += marker + "end\n"
     report = execute(["show", "--deps", "all", "--order", "alpha", "--format", format_string, "--", *targets])
-    nodes, edges = parse_report(report, marker)
+    parsed = parse_report(report, marker, detailed=detailed)
+    nodes, edges = parsed[:2]
     # Resolve links/normalized target names using the same public interface.
     roots_report = execute(["show", "--deps", "none", "--format", "%{name}", "--", *targets])
     roots = sorted(set(line.strip() for line in roots_report.splitlines() if line.strip()))
-    graph = Graph(roots, nodes, edges, {"bst_version": version, "options": dict(options), "strict": True})
+    graph = Graph(roots, nodes, edges, {"bst_version": version, "options": dict(options), "strict": True},
+                  parsed[2] if detailed else None)
     return Graph.from_dict(graph.as_dict())

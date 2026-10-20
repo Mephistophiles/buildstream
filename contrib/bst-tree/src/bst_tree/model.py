@@ -20,6 +20,30 @@ import os
 from pathlib import Path
 import tempfile
 
+DETAIL_FIELDS = ("config", "vars", "env", "public")
+
+
+def validate_details(details, nodes):
+    if not isinstance(details, dict) or set(details) != set(nodes):
+        raise ValueError("Snapshot details must cover exactly the graph nodes")
+
+    def valid(value):
+        if isinstance(value, dict):
+            return all(isinstance(k, str) and valid(v) for k, v in value.items())
+        if isinstance(value, list):
+            return all(valid(v) for v in value)
+        return value is None or type(value) in (str, bool, int, float)
+
+    for data in details.values():
+        if not isinstance(data, dict) or set(data) != set(DETAIL_FIELDS):
+            raise ValueError("Invalid snapshot detail fields")
+        if not all(isinstance(v, dict) and valid(v) for v in data.values()):
+            raise ValueError("Snapshot details require JSON-compatible mappings")
+    try:
+        json.dumps(details, allow_nan=False)
+    except (ValueError, TypeError) as error:
+        raise ValueError("Invalid snapshot detail values") from error
+
 
 @dataclass
 class Graph:
@@ -27,6 +51,11 @@ class Graph:
     nodes: dict[str, dict]
     edges: dict[tuple[str, str], frozenset[str]]
     metadata: dict
+    details: dict | None = None
+
+    @property
+    def format_version(self):
+        return 2 if self.details is not None else 1
 
     def adjacency(self, reverse=False):
         result = {name: [] for name in self.nodes}
@@ -60,7 +89,8 @@ class Graph:
                     edges[parent, child] = kinds
                     included.add(child)
                     queue.append(child)
-        return Graph(self.targets, {n: self.nodes[n] for n in included}, edges, self.metadata)
+        return Graph(self.targets, {n: self.nodes[n] for n in included}, edges, self.metadata,
+                     {n: self.details[n] for n in included} if self.details is not None else None)
 
     def paths_to(self, destination):
         """One shortest path per root; linear traversal rather than path enumeration."""
@@ -85,8 +115,8 @@ class Graph:
         return paths
 
     def as_dict(self):
-        return {
-            "format_version": 1,
+        result = {
+            "format_version": self.format_version,
             "targets": sorted(set(self.targets)),
             "metadata": self.metadata,
             "nodes": {name: self.nodes[name] for name in sorted(self.nodes)},
@@ -95,11 +125,14 @@ class Graph:
                 for (parent, child), kinds in sorted(self.edges.items())
             ],
         }
+        if self.details is not None:
+            result["details"] = self.details
+        return result
 
     @classmethod
     def from_dict(cls, data):
-        if not isinstance(data, dict) or type(data.get("format_version")) is not int or data["format_version"] != 1:
-            raise ValueError("Unsupported snapshot format (expected version 1)")
+        if not isinstance(data, dict) or type(data.get("format_version")) is not int or data["format_version"] not in (1, 2):
+            raise ValueError("Unsupported snapshot format (expected version 1 or 2)")
         targets, nodes, records = data.get("targets"), data.get("nodes"), data.get("edges")
         if not isinstance(nodes, dict) or not nodes or not all(isinstance(n, str) and n for n in nodes):
             raise ValueError("Snapshot requires named nodes")
@@ -133,7 +166,12 @@ class Graph:
             if (parent, child) in edges:
                 raise ValueError("Duplicate edge")
             edges[parent, child] = frozenset(kinds)
-        return cls(sorted(set(targets)), nodes, edges, data["metadata"])
+        details = data.get("details")
+        if data["format_version"] == 2:
+            validate_details(details, nodes)
+        elif "details" in data:
+            raise ValueError("Snapshot details require format version 2")
+        return cls(sorted(set(targets)), nodes, edges, data["metadata"], details)
 
 
 def read_snapshot(path):

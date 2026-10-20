@@ -30,6 +30,7 @@ To update from a changed checkout, run `pipx install --force ./contrib/bst-tree`
 | `browse --snapshot FILE` | Explore a saved graph | A terminal; no original project or `bst` required |
 | `snapshot -C PROJECT TARGET... -o FILE` | Save the full graph as JSON | Working `bst` and project plugins; no terminal required |
 | `diff OLD NEW` | Compare saved graphs as text or JSON | Neither `bst` nor a terminal required |
+| `diff OLD NEW --tui` | Inspect changes and dependency candidates interactively | A terminal; no `bst` required |
 
 Live `browse` and `snapshot` require at least one explicit target. `-C` defaults
 to the current directory. Multiple targets, junction-qualified names, and repeated
@@ -123,7 +124,8 @@ unavailable because snapshots do not contain configuration or files.
 
 ## Comparison
 
-`diff` is always noninteractive. `+`, `-`, and `~` mark additions, removals, and
+`diff` defaults to noninteractive tree output. `--tui` (or `--format tui`) opens
+the interactive change inspector described below. `+`, `-`, and `~` mark additions, removals, and
 changes. Edge annotations show old/new build/run types. Only changed branches and
 their ancestor context are shown; unchanged paths to the dependency of a changed
 edge are omitted. Filtering attributes also removes branches whose only changes
@@ -172,8 +174,8 @@ bst-tree diff before.json after.json --fields kind source_info workspace
 ```
 
 `--fields` selects attributes and `--ignore-fields` excludes attributes. Available
-fields are `kind`, `key` (cache key), `source_info`, `workspace`, and `metadata`
-(snapshot metadata). These options and `--structure-only` are mutually exclusive.
+fields are `kind`, `key` (cache key), `source_info`, `workspace`, `details`
+(resolved inputs), and `metadata` (snapshot metadata). These options and `--structure-only` are mutually exclusive.
 Node additions/removals, dependency edges and their build/run types, and targets
 are always compared. `--structure-only` skips all attributes and snapshot metadata.
 Filtering applies to tree and JSON output, counts, and `--check`; nodes changed
@@ -184,6 +186,80 @@ contain only selected attributes (empty objects in structure-only mode).
 Normal success exits 0. With `--check`, differences in the selected comparison exit 1.
 Errors exit 2. JSON output has its own `format_version: 1`, a summary, node and edge
 changes with `old`/`new`, and metadata changes.
+
+## Interactive change analysis
+
+Capture resolved inputs **before and after** the change:
+
+```sh
+bst-tree snapshot -C /path/to/project app.bst --details -o before.json
+# Change source refs, element configuration, or project settings.
+bst-tree snapshot -C /path/to/project app.bst --details -o after.json
+bst-tree diff before.json after.json --tui
+# For scripts / CI:
+bst-tree diff before.json after.json --explain --format json --check
+```
+
+`--details` adds effective `config`, `vars`, `env`, and `public` mappings to the
+same framed `bst show --deps all` query that captures the graph. No build, track,
+source checkout or artifact export is run. As with ordinary graph capture,
+project loading can require junction sources and project plugins. The two
+snapshots should use the same targets, options and BuildStream version.
+Detailed snapshots may be substantially larger and can contain environment values,
+URLs or credentials present in project configuration. Treat them as project data.
+
+The inspector initially focuses on elements with **observed local changes** when
+there are any. The header always reports the total changed elements and category
+counts. The left pane lists each element once; the right pane shows a short
+summary and one small diff. Long diffs are abbreviated only in the overview. Related-element lists show up
+to 100 entries with exact total counts; JSON explanation exports the full lists.
+Observed local origins are listed before intermediary keys.
+Use the section picker to view the complete selected section. Cache-key hashes
+are available in their own section, rather than filling the overview.
+
+- `0` / `1` / `2` / `3`: all changes / observed inputs / dependency candidates /
+  unexplained changes. Added and removed elements appear under All.
+- `/`: filter names, including junction-qualified names; Escape returns to the list.
+- Arrows or `j`/`k`: select an element. Tab switches focus between controls.
+- `f`: select a changed section, dependency candidates, changed consumers, or context.
+- `c`: toggle three lines versus full diff context in a selected section.
+- `q`: exit. `--check` retains the same exit semantics after closing the inspector.
+
+`--all` also lists unchanged elements. Existing `--fields`, `--ignore-fields` and
+`--structure-only` filters apply to the comparison and analysis. Snapshot context
+remains available for interpreting results. `--reverse` is a tree-output option
+and is rejected with the TUI. The inspector adapts to narrow terminals by stacking
+the element list above the detail pane. Identical snapshots and context-only
+changes have an explicit empty state with access to snapshot context.
+
+The categories describe **evidence, not proven causes**:
+
+- **Observed inputs:** captured source information, kind, workspace presence,
+  resolved settings, or outgoing dependency declarations changed. Settings can
+  change without changing the cache key, for example a nocache environment value.
+- **Dependency candidates:** the selected element's resolved key changed, and a
+  build input's resolved key or build-closure membership changed. Both snapshots
+  must confirm strict mode. Build inputs mean direct build dependencies plus
+  their runtime closure; a runtime-only dependency of the element is not sufficient.
+- **Unexplained:** no supported candidate or observed local change was found.
+  Unresolved keys and unconfirmed strict mode never receive dependency attribution.
+- **Added / removed:** an element exists on only one side.
+
+Changed consumers are the changed elements that list an element as a dependency
+candidate; they are not a prediction that a build will run. An origin with a changed key but no captured local evidence remains in the
+unexplained category, even when it is a dependency candidate for another element. No private
+BuildStream key reconstruction is attempted: plugin unique keys, sandbox settings,
+project fatal-warning configuration, and environment nocache rules are not fully
+captured. Workspace file contents are not captured. Version and option differences
+are called out in snapshot context.
+
+Old snapshots remain useful for graph/key/source comparisons. If either snapshot
+lacks details, resolved-input comparison is skipped and the inspector reports the
+coverage gap. Missing details are not treated as an input removal, and the gap
+alone does not trigger `--check`. Use `--explain` for a bounded text analysis or add
+it to JSON output for the full evidence records. The default noninteractive output
+and JSON diff format remain compatible; the extra `explanation` object is opt-in.
+Snapshot and noninteractive diff commands still do not import Textual.
 
 ## Data and limitations
 
@@ -202,7 +278,9 @@ covers elements without sources. Unresolved keys are null. A key change alone is
 not interpreted as an upstream version change. Workspace content is not captured;
 only workspace presence is recorded. Artifact contents and sizes are not compared.
 
-Snapshots use `format_version: 1`, canonical targets, metadata (bst version, project
+Basic snapshots use `format_version: 1`; `snapshot --details` writes version 2
+with a separate, validated per-element `details` map. Both versions are readable.
+Snapshots contain canonical targets, metadata (bst version, project
 options and strict mode), a map of nodes keyed by full junction-qualified name,
 and typed directed edges. There are no timestamps or absolute project paths.
 Unknown format versions and dangling edges are rejected. Treat snapshots as project
@@ -232,7 +310,9 @@ BST_TREE_TEST_LIVE=1 python -m pytest -c contrib/bst-tree/pyproject.toml contrib
 
 The implementation separates CLI parsing (`cli.py`), public BuildStream CLI
 queries (`adapter.py`), graph validation and snapshots (`model.py`), comparison
-(`diff.py`), and terminal navigation (`tui.py`). Element inspection lives in
+(`diff.py`), change evidence (`explain.py`, with compact build-input reachability
+in `keygraph.py`), and terminal navigation (`tui.py`
+and `diff_tui.py`). Element inspection lives in
 `inspection.py` and `inspection_tui.py`. Snapshot and diff commands do not import
 Textual. Each interactive inspection owns a cancellable command runner and its
 temporary exports; late background results cannot update a closed viewer.

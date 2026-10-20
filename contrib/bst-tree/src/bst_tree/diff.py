@@ -17,7 +17,7 @@ from collections import deque
 import json
 
 NODE_FIELDS = ("kind", "key", "source_info", "workspace")
-DIFF_FIELDS = (*NODE_FIELDS, "metadata")
+DIFF_FIELDS = (*NODE_FIELDS, "metadata", "details")
 
 
 def compare(old, new, fields=None):
@@ -27,12 +27,18 @@ def compare(old, new, fields=None):
     if unknown:
         raise ValueError("Unknown diff fields: " + ", ".join(sorted(unknown)))
 
-    def selected(node):
-        return {field: value for field, value in node.items() if field in fields} if node is not None else None
+    def selected(graph, name):
+        node = graph.nodes.get(name)
+        if node is None:
+            return None
+        result = {field: value for field, value in node.items() if field in fields}
+        if "details" in fields and old.details is not None and new.details is not None:
+            result["details"] = graph.details[name]
+        return result
 
     nodes = []
     for name in sorted(old.nodes.keys() | new.nodes.keys()):
-        before, after = selected(old.nodes.get(name)), selected(new.nodes.get(name))
+        before, after = selected(old, name), selected(new, name)
         if before != after:
             nodes.append(
                 {
@@ -66,7 +72,7 @@ def compare(old, new, fields=None):
     }
     return {
         "format_version": 1,
-        "snapshot_versions": {"old": 1, "new": 1},
+        "snapshot_versions": {"old": old.format_version, "new": new.format_version},
         "summary": summary,
         "nodes": nodes,
         "edges": edges,

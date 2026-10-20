@@ -59,6 +59,8 @@ def parser():
         else:
             sub.add_argument("-o", "--output", required=True, metavar="FILE",
                              help="Output JSON snapshot; replaces an existing file")
+            sub.add_argument("--details", action="store_true",
+                             help="Capture resolved config, variables, environment and public data for change analysis")
     diff = commands.add_parser(
         "diff", help="Compare two snapshots without loading a project",
         description="Compare saved graphs; no BuildStream installation or terminal is required.",
@@ -67,8 +69,11 @@ def parser():
     )
     diff.add_argument("old", help="Baseline JSON snapshot")
     diff.add_argument("new", help="Updated JSON snapshot")
-    diff.add_argument("--format", choices=("tree", "json"), default="tree",
-                      help="Output format (default: tree); JSON never includes color escapes")
+    diff.add_argument("--format", choices=("tree", "json", "tui"), default="tree",
+                      help="Output format (default: tree); tui opens an interactive change inspector")
+    diff.add_argument("--tui", dest="format", action="store_const", const="tui",
+                      help="Open the interactive change inspector (alias for --format tui)")
+    diff.add_argument("--explain", action="store_true", help="Include observed inputs and dependency candidates")
     diff.add_argument("--all", action="store_true", help="Include unchanged branches")
     diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
     diff.add_argument(
@@ -147,6 +152,24 @@ def main(argv=None):
             elif args.ignore_fields:
                 fields -= set(args.ignore_fields)
             delta = compare(old, new, fields=fields)
+            if args.format == "tui":
+                if not sys.stdin.isatty() or not sys.stdout.isatty():
+                    raise ValueError("interactive diff requires a terminal (TTY); use --explain for text or JSON")
+                if args.reverse:
+                    raise ValueError("--reverse applies to tree output; omit it for interactive diff")
+                from .diff_tui import DiffExplorer
+                DiffExplorer(old, new, fields=fields, show_all=args.all,
+                             labels=(os.path.basename(args.old), os.path.basename(args.new))).run()
+                return 1 if args.check and has_changes(delta) else 0
+            explanation = None
+            if args.explain:
+                from .explain import analyze, render_explanation
+                explanation = analyze(old, new, fields=fields, limit=None if args.format == "json" else 10)
+                if args.format == "json":
+                    delta["explanation"] = explanation
+            if explanation is not None and args.format == "tree":
+                print(render_explanation(explanation))
+                return 1 if args.check and has_changes(delta) else 0
             print(
                 json.dumps(delta, ensure_ascii=False, indent=2, sort_keys=True)
                 if args.format == "json"
@@ -162,7 +185,7 @@ def main(argv=None):
             )
             return 1 if args.check and has_changes(delta) else 0
         if args.command == "snapshot":
-            write_snapshot(capture(args.targets, args.directory, args.option), args.output)
+            write_snapshot(capture(args.targets, args.directory, args.option, detailed=args.details), args.output)
             return 0
         if args.snapshot and (args.targets or args.directory or args.option):
             arguments.error("--snapshot cannot be combined with project arguments")
