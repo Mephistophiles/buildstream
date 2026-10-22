@@ -23,7 +23,7 @@ from .index import digest_parts, MAX_DIRECTORY
 from .reapi import Artifact, Source
 
 
-def index_cache(index, refs_directory=None, progress=None, *, sources=False, on_tree=None, seen=None):
+def index_cache(index, refs_directory=None, progress=None, *, sources=False, on_tree=None, seen=None, on_metadata=None):
     refs = Path(refs_directory) if refs_directory else index.cas_directory.parent / "artifacts" / "refs"
     result = {"cas_directory": str(index.cas_directory), "refs_directory": str(refs),
               "index_path": str(index.database), "refs": 0, "indexed_trees": 0,
@@ -65,6 +65,9 @@ def index_cache(index, refs_directory=None, progress=None, *, sources=False, on_
                     artifact = (Source if sources else Artifact).FromString(data)
                     if artifact.version not in ((0,) if sources else (2,)):
                         raise ValueError(f"Unsupported artifact metadata version: {artifact.version}")
+                    if on_metadata is not None:
+                        on_metadata(ref, artifact)
+                        continue
                     if not artifact.HasField("files"):
                         if sources:
                             raise ValueError("Source metadata has no files tree")
@@ -92,3 +95,29 @@ def index_cache(index, refs_directory=None, progress=None, *, sources=False, on_
     result["complete"] = not result["errors"]
     result["stats"] = index.stats()
     return result
+
+
+def source_owners(index):
+    """Map exact saved source digests to historical project/normalized-element IDs."""
+    refs = index.cas_directory.parent / "artifacts" / "refs"
+    owners = {}
+    if not refs.exists():
+        return owners, []
+
+    def record(ref, artifact):
+        parts = Path(ref).parts
+        if len(parts) != 3:
+            raise ValueError("Expected project/element/key artifact reference")
+        if not artifact.HasField("sources"):
+            return
+        digest = f"{artifact.sources.hash}/{artifact.sources.size_bytes}"
+        digest_parts(digest)
+        owner = "/".join(parts[:2])
+        owners.setdefault(digest, {}).setdefault(owner, set()).add(ref)
+
+    report = index_cache(index, refs, on_metadata=record)
+    return {
+        digest: [{"element": owner, "artifact_refs": sorted(references)}
+                 for owner, references in sorted(values.items())]
+        for digest, values in owners.items()
+    }, report["errors"]

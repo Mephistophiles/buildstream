@@ -27,7 +27,7 @@ def directory_class(name="Directory"):
     )
     fields = {
         "Source": [("version", 1, "int32", False), ("files", 2, "Digest", False)],
-        "Artifact": [("version", 1, "int32", False), ("files", 8, "Digest", False)],
+        "Artifact": [("version", 1, "int32", False), ("files", 8, "Digest", False), ("sources", 13, "Digest", False)],
         "Digest": [("hash", 1, "string", False), ("size_bytes", 2, "int64", False)],
         "FileNode": [
             ("name", 1, "string", False),

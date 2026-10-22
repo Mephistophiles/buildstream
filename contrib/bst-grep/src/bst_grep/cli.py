@@ -273,7 +273,7 @@ def _run(args, output, cas):
 
 
 def cached_sources(args, output, cas):
-    from bst_cas.cache import index_cache
+    from bst_cas.cache import index_cache, source_owners
     from bst_cas.integration import artifact_files
 
     if args.targets or args.directory or args.option or args.why or args.deps != "none":
@@ -284,6 +284,7 @@ def cached_sources(args, output, cas):
     validate(command)
     matched_lines, matched_files, searched = 0, set(), 0
     seen, reports = set(), []
+    owners, owner_errors = source_owners(cas)
 
     def scan(ref, digest, entries):
         nonlocal matched_lines, searched
@@ -291,7 +292,12 @@ def cached_sources(args, output, cas):
         with artifact_files(cas, None, ref, loaded=(entries, identity)) as (root, origin):
             with closing(search(root, command)) as records:
                 for record in records:
-                    record.update(element=ref, source_ref=ref, tree_digest=digest,
+                    known = owners.get(digest, [])
+                    labels = [owner["element"] for owner in known]
+                    label = ", ".join(labels) if labels else "unknown-owner [" + digest.split("/")[0][:12] + "]"
+                    record.update(element=label, elements=labels, owners=known,
+                                  ownership="artifact-source-digest" if known else "unknown",
+                                  source_ref=ref, tree_digest=digest,
                                   area="cached-sources", origin=origin)
                     if record["type"] == "match":
                         matched_lines += 1
@@ -305,7 +311,7 @@ def cached_sources(args, output, cas):
             reports.append(index_cache(cas, directory, sources=True, on_tree=scan, seen=seen))
     if not reports:
         raise ValueError("No local source metadata found (elementsources/source_protos); use bst-grep PATTERN TARGET.bst for project sources")
-    errors = [error for report in reports for error in report["errors"]]
+    errors = owner_errors + [error for report in reports for error in report["errors"]]
     for error in errors:
         output.emit({"type": "error", "element": error["ref"], "message": error["message"]})
     output.emit({"type": "summary", "area": "cached-sources", "complete": not errors,

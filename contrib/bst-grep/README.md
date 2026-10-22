@@ -218,10 +218,15 @@ searches available source trees with ripgrep. It does not fetch sources or
 search open workspaces, raw VCS mirrors, or source trees missing from CAS.
 For a project's current sources/workspaces use `bst-grep PATTERN TARGET.bst`.
 
-Results identify the cached source reference, file, line and column; JSON also
-includes `source_ref` and `tree_digest`. References are historical cache identities,
-not inferred current element owners. Identical trees are searched once, labelled
-with the first encountered reference. Regular files are copied into temporary
+Results show `project/element::file:line:column:text` when an exact source-tree
+digest matches the `sources` field in locally saved artifact metadata. All matching
+owners are shown; strong/weak keys for the same owner are deduplicated. These are
+historical **normalized artifact element names**, not necessarily original `.bst`
+paths or junction-qualified current project names. No name is guessed from a
+source key or a matching artifact output tree. When no association exists, output
+shows `unknown-owner [digest-prefix]` instead of an absolute cache path.
+JSON retains `source_ref` and `tree_digest`, and adds `elements`, `owners` (with
+artifact refs) and `ownership`. Identical source trees are searched once. Regular files are copied into temporary
 search directories; symlinks are omitted. CAS is read-only, while inventories
 are saved in the derived index. Regex/glob validation happens before scanning.
 Missing/corrupt trees produce errors and exit 2 while other matches remain visible;

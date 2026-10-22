@@ -96,6 +96,8 @@ def test_grep_cached_sources_real_rg(cas, database, capsys):
     assert grep([*args, '-g', '*.c', 'needle']) == 0
     text = capsys.readouterr()
     assert 'hello.c:1:5:int needle;' in text.out
+    assert 'unknown-owner [' in text.out
+    assert str(cas.directory.parent) not in text.out
     assert '1/1 source trees' in text.err
     assert grep([*args, '--json', '-F', 'other line']) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -117,3 +119,42 @@ def test_cached_source_search_missing_metadata_and_project_args(cas, database, c
     assert 'No local source metadata' in json.loads(capsys.readouterr().out)['message']
     assert grep([*args, 'product.bst']) == 2
     assert 'project arguments' in json.loads(capsys.readouterr().out)['message']
+
+
+def test_source_grep_displays_all_artifact_owners(cas, database, capsys):
+    from bst_cas.reapi import Source
+    from bst_grep.cli import main as grep
+    root = cas.tree(files=[('hello.c', cas.put(b'int needle;\n'), False)])
+    source = Source()
+    source.files.hash, size = root.split('/')
+    source.files.size_bytes = int(size)
+    directory = cas.directory.parent / 'elementsources'
+    directory.mkdir()
+    (directory / 'key').write_bytes(source.SerializeToString())
+    refs = cas.directory.parent / 'artifacts/refs'
+    for name in ('project/libfoo/strong', 'project/libfoo/weak', 'other/libbar/key'):
+        path = write_ref(refs, name)
+        artifact = Artifact.FromString(path.read_bytes())
+        artifact.sources.hash = source.files.hash
+        artifact.sources.size_bytes = source.files.size_bytes
+        path.write_bytes(artifact.SerializeToString())
+    args = ['--in', 'cached-sources', '--cas-directory', str(cas.directory),
+            '--cas-index', str(database), 'needle']
+    assert grep(args) == 0
+    text = capsys.readouterr().out
+    assert 'other/libbar, project/libfoo::hello.c:1:5:int needle;' in text
+    assert str(cas.directory.parent) not in text
+    assert grep([*args, '--json']) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[0]['elements'] == ['other/libbar', 'project/libfoo']
+    assert len(rows[0]['owners'][1]['artifact_refs']) == 2
+    assert rows[0]['ownership'] == 'artifact-source-digest'
+
+
+def test_source_owners_does_not_guess_from_files_digest(cas, database):
+    from bst_cas.cache import source_owners
+    root = cas.tree()
+    write_ref(cas.directory.parent / 'artifacts/refs', 'project/libfoo/key', root)
+    with Index(cas.directory, database) as index:
+        owners, errors = source_owners(index)
+    assert owners == {} and errors == []
