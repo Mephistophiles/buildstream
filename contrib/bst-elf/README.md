@@ -66,7 +66,14 @@ bst-elf --profile kos.json product.bst --path /usr/bin/app --json
 relative slash-containing NEEDED values require an explicit absolute target `cwd`.
 Unknown tokens or unsupported paths are analysis errors, not silently ignored.
 `--library-path` is repeatable and prepends explicit directories to the profile's
-library-path list. It does not read the host's LD_LIBRARY_PATH.
+library-path list. For live targets, the resolved `LD_LIBRARY_PATH` from
+`bst show --deps none --format '%{env}'` is appended after those explicit
+paths. This includes project/element environment composition, variables and
+selected `--option` values. All paths refer to the target filesystem.
+Multiple targets must have the same resolved value; otherwise inspect them
+separately. Dependency elements' build environments are not merged into it.
+Offline `--archive` mode uses only the explicit profile/CLI paths.
+The host's `LD_LIBRARY_PATH` and `shell.environment` overrides are not read.
 
 This is a **declared-dependency model, not a complete loader emulator**. It does
 not model symbol binding, version requirements, dlopen, LD_PRELOAD, secure execution,

@@ -99,3 +99,86 @@ def test_invalid_inputs_are_json_errors(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["complete"] is False
     assert main(["--archive", "x", "unused", "app.bst", "--json"]) == 2
     assert "cannot be combined" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize(
+    'environment, expected',
+    [('{}', []), ('LD_LIBRARY_PATH: ""', []),
+     ('LD_LIBRARY_PATH: /opt/lib:/vendor/lib;/extra', ['/opt/lib', '/vendor/lib', '/extra']),
+     ('LD_LIBRARY_PATH: ":/opt/lib:"', ['', '/opt/lib', ''])],
+)
+def test_project_library_path(environment, expected, monkeypatch):
+    from bst_elf.cli import project_library_path
+    from bst_tools_core.project import Project
+
+    project = Project('/project', [('arch', 'arm64')])
+    def report(targets, fields, deps):
+        assert targets == ['product.bst']
+        assert fields == ('name', 'env') and deps == 'none'
+        return [{'name': 'product.bst', 'env': environment}]
+    monkeypatch.setattr(project, 'report', report)
+    monkeypatch.setenv('LD_LIBRARY_PATH', '/host-only')
+    assert project_library_path(project, ['product.bst']) == expected
+
+
+@pytest.mark.parametrize('environment', ['[]', 'LD_LIBRARY_PATH: []', 'LD_LIBRARY_PATH: 42', '[broken'])
+def test_invalid_project_environment(environment, monkeypatch):
+    from bst_elf.cli import project_library_path
+    from bst_tools_core.project import Project
+
+    project = Project()
+    monkeypatch.setattr(project, 'report', lambda *a: [{'name': 'app', 'env': environment}])
+    with pytest.raises(ValueError):
+        project_library_path(project, ['app'])
+
+
+def test_conflicting_target_environments(monkeypatch):
+    from bst_elf.cli import project_library_path
+    from bst_tools_core.project import Project
+
+    project = Project()
+    monkeypatch.setattr(project, 'report', lambda *a: [
+        {'name': 'a', 'env': 'LD_LIBRARY_PATH: /a'},
+        {'name': 'b', 'env': 'LD_LIBRARY_PATH: /b'},
+    ])
+    with pytest.raises(ValueError, match='inspect them separately'):
+        project_library_path(project, ['a', 'b'])
+
+
+def test_live_config_library_path_resolves_real_elf(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    import bst_elf.cli as cli
+    from bst_tools_core.project import Project
+
+    build_archives(tmp_path)
+    # Move the provider away from both RUNPATH and the default search paths.
+    archive = tmp_path / 'live.tar'
+    with tarfile.open(archive, 'w') as bundle:
+        bundle.add(tmp_path / 'app', arcname='bin/app')
+        bundle.add(tmp_path / 'libanswer.so', arcname='vendor/lib/libanswer.so')
+    graph = SimpleNamespace(
+        selected={'product.bst'},
+        nodes={'product.bst': {'kind': 'import', 'state': 'cached', 'full-key': 'key'}},
+        paths=lambda owner: [[owner]],
+    )
+    monkeypatch.setattr(Project, 'graph', lambda *a: graph)
+    def report(self, targets, fields, deps='none'):
+        if fields == ('name', 'env'):
+            return [{'name': 'product.bst', 'env': 'LD_LIBRARY_PATH: /vendor/lib'}]
+        return [{'full-key': 'key', 'artifact-cas-digest': 'digest'}]
+    monkeypatch.setattr(Project, 'report', report)
+    class Runner:
+        def __call__(self, argv, **kwargs):
+            kwargs['stdout_file'].write(archive.read_bytes())
+            return SimpleNamespace(returncode=0, timed_out=False, truncated=False)
+        def cancel(self):
+            pass
+    monkeypatch.setattr(cli, 'CommandRunner', Runner)
+    monkeypatch.setenv('LD_LIBRARY_PATH', '/host-only')
+    assert main(['product.bst', '--path', '/bin/app', '--library-path', '/explicit', '--json', '--check']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['profile']['library_path'] == ['/explicit', '/vendor/lib']
+    assert not result['findings'] and result['coverage']['complete']
+    # Offline input must not query BuildStream or inherit host/project paths.
+    assert main(['--archive', 'product', str(archive), '--path', '/bin/app', '--json', '--check']) == 1
+    assert json.loads(capsys.readouterr().out)['profile']['library_path'] == []

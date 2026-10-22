@@ -16,10 +16,13 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tarfile
 import tempfile
+
+from ruamel.yaml.error import YAMLError
 
 from .archive import path_name, scan
 from .elf import read_elf
@@ -85,7 +88,31 @@ def parser():
     return p
 
 
-def collect(args, runner, cas=None):
+def project_library_path(project, targets):
+    """Read resolved target environments, never the invoking host environment."""
+    paths = []
+    for record in project.report(targets, ("name", "env"), "none"):
+        try:
+            environment = project.yaml.load(record["env"])
+        except YAMLError as error:
+            raise ValueError("Malformed environment from bst show") from error
+        if not isinstance(environment, dict):
+            raise ValueError("Invalid environment from bst show")
+        value = environment.get("LD_LIBRARY_PATH", "")
+        if not isinstance(value, str) or "\x00" in value:
+            raise ValueError("LD_LIBRARY_PATH must be a string without NUL")
+        # An unset/empty variable adds no directories. Embedded empty entries
+        # retain their cwd semantics and are validated by Resolver.expand().
+        directories = re.split(r"[:;]", value) if value else []
+        paths.append(directories)
+    if not paths:
+        raise ValueError("No target environment from bst show")
+    if any(value != paths[0] for value in paths[1:]):
+        raise ValueError("Targets have different LD_LIBRARY_PATH values; inspect them separately")
+    return paths[0]
+
+
+def collect(args, runner, cas=None, *, profile=None):
     entries = []
     coverage = {"selected": 0, "inspected": 0, "missing": [], "skipped": [], "errors": [], "complete": False}
     if args.archive and (args.targets or args.directory or args.option):
@@ -109,6 +136,8 @@ def collect(args, runner, cas=None):
     else:
         project = Project(args.directory, args.option, run=execute)
         graph = project.graph(args.targets, args.deps)
+        if profile is not None:
+            profile["library_path"] += project_library_path(project, args.targets)
         inputs = []
         coverage["selected"] = len(graph.selected)
         for name in sorted(graph.selected):
@@ -249,7 +278,7 @@ def main(argv=None):
                 ) from error
             cas = open_index(args)
         profile = load_profile(args.profile, args.library_path)
-        entries, coverage = collect(args, runner, cas)
+        entries, coverage = collect(args, runner, cas, profile=profile)
         if cas is not None:
             coverage["cas_index"] = cas.stats()
         try:
