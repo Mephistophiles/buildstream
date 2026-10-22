@@ -32,9 +32,11 @@ Requires Python 3.10+. For pipx, run the installer from any working directory:
 
 The script uses one pipx environment named `bst-cas`. It installs the local
 `bst-tools-core` library before injecting its consumers with `--include-apps`.
-It also passes the local core path to pip during each consumer installation,
-so forced dependency resolution does not look for this unpublished package on
-PyPI. A separate `pipx install bst-tools-core` would not work: it has no application,
+It constrains dependency resolution to the local core during each consumer
+installation, so forced dependency resolution does not look for this unpublished
+package on PyPI. Temporary constraints work with both pip and uv and are not
+saved in pipx metadata. This also supports older pipx versions that discover
+package names by installing a single package in a temporary environment. A separate `pipx install bst-tools-core` would not work: it has no application,
 and separate pipx environments do not share installed Python libraries.
 BuildStream remains independent and is invoked through `bst` on PATH.
 Use `PIPX_DEFAULT_PYTHON=python3.12` (or another Python 3.10+) to choose the
