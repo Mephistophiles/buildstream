@@ -10,7 +10,13 @@ For Midnight Commander panels and live project bookmarks, see
 
 ## Installation and quick start
 
-From the repository root, in your chosen Python environment:
+For the complete suite through pipx, run `./contrib/install-bst-tools.sh`
+from the repository root. Rerun with `--force` after updating the checkout;
+use `--headless` to omit TUIs on a fresh install. See the
+[pipx installation guide](../bst-tools-core/README.md#install-from-this-checkout)
+for the shared environment and manual commands.
+
+For only bst-tree, in your chosen Python environment:
 
 ```sh
 python -m pip install ./contrib/bst-tools-core './contrib/bst-tree[tui]'

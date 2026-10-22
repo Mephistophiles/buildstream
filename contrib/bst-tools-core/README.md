@@ -21,7 +21,43 @@ than a general utility dependency.
 
 ## Install from this checkout
 
-Requires Python 3.10+. From the repository root, use a dedicated environment:
+Requires Python 3.10+. For pipx, run the installer from any working directory:
+
+```sh
+./contrib/install-bst-tools.sh             # All six commands, including TUIs
+./contrib/install-bst-tools.sh --force     # Update after git pull
+# Or omit TUI dependencies on a fresh installation:
+./contrib/install-bst-tools.sh --headless
+```
+
+The script uses one pipx environment named `bst-cas`. It installs the local
+`bst-tools-core` library before injecting its consumers with `--include-apps`.
+It also passes the local core path to pip during each consumer installation,
+so forced dependency resolution does not look for this unpublished package on
+PyPI. A separate `pipx install bst-tools-core` would not work: it has no application,
+and separate pipx environments do not share installed Python libraries.
+BuildStream remains independent and is invoked through `bst` on PATH.
+Use `PIPX_DEFAULT_PYTHON=python3.12` (or another Python 3.10+) to choose the
+interpreter for a new environment, and `pipx ensurepath` if app links are not
+on PATH. `--force` reinstalls checkout packages and replaces existing app links;
+check `pipx list` first if these commands already belong to other environments.
+The installation is not editable: rerun with `--force` after checkout changes.
+`--headless` does not remove TUI dependencies from an existing environment.
+Remove the complete suite with `pipx uninstall bst-cas`.
+
+Equivalent manual commands, from the repository root:
+
+```sh
+pipx install ./contrib/bst-cas
+pipx inject bst-cas ./contrib/bst-tools-core
+pipx inject --include-apps bst-cas './contrib/bst-tree[tui]'
+pipx inject --include-apps bst-cas './contrib/bst-diff[tui]'
+pipx inject --include-apps bst-cas ./contrib/bst-elf
+pipx inject --include-apps bst-cas ./contrib/bst-blame
+pipx inject --include-apps bst-cas ./contrib/bst-grep
+```
+
+Alternatively, use a dedicated virtual environment:
 
 ```sh
 python -m venv /path/to/bst-tools-env
