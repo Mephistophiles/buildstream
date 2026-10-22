@@ -9,7 +9,7 @@ description = "Shared read-only BuildStream CAS inventory and content analysis c
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["protobuf>=4.25"]
+dependencies = ["protobuf>=4.25", "ruamel.yaml>=0.18"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

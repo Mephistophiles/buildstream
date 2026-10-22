@@ -17,9 +17,12 @@ import argparse
 import json
 import math
 import os
+import shutil
+import subprocess
 import sys
 
 from .index import Index
+from .config import cas_directory
 
 
 def days(value):
@@ -37,7 +40,7 @@ def main(argv=None):
     p.add_argument(
         "--cas-directory",
         default=os.environ.get("BST_CAS_DIRECTORY"),
-        help="BuildStream cas directory (or BST_CAS_DIRECTORY); explicit, not guessed",
+        help="CAS directory override (default: discover from BuildStream user configuration)",
     )
     p.add_argument(
         "--cas-index",
@@ -53,9 +56,23 @@ def main(argv=None):
     commands.add_parser("stats", help="Count indexed trees and per-file analyses")
     prune = commands.add_parser("prune", help="Remove old derived records; never remove CAS objects")
     prune.add_argument("--older-than", type=days, default=30, metavar="DAYS")
-    args = p.parse_args(argv)
+    for name in ("blame", "grep", "elf"):
+        commands.add_parser(name, add_help=False, help=f"Run bst-{name} with automatic CAS discovery")
+    args, forwarded = p.parse_known_args(argv)
+    if args.command not in ("blame", "grep", "elf") and forwarded:
+        p.error("unrecognized arguments: " + " ".join(forwarded))
     try:
-        with Index(args.cas_directory, args.cas_index) as index:
+        if args.command in ("blame", "grep", "elf"):
+            executable = shutil.which("bst-" + args.command)
+            if executable is None:
+                raise ValueError(f"bst-{args.command} is missing from PATH; install the corresponding tool")
+            environment = os.environ.copy()
+            environment["BST_CAS_DIRECTORY"] = cas_directory(args.cas_directory)
+            if args.cas_index:
+                environment["BST_CAS_INDEX"] = args.cas_index
+            defaults = ["--in", "artifacts"] if args.command == "grep" else []
+            return subprocess.call([executable, *defaults, *forwarded], env=environment)
+        with Index(cas_directory(args.cas_directory), args.cas_index) as index:
             if args.command == "index":
                 result = {"tree_digest": args.digest, "entries": index.tree(args.digest), "stats": index.stats()}
             elif args.command == "find":

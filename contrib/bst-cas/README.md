@@ -1,5 +1,41 @@
 # bst-cas
 
+## Search without configuring CAS paths
+
+```sh
+# File owners and dependency paths, using CAS automatically.
+bst-cas blame /usr/lib/libc++.so product.bst
+bst-cas blame --duplicates --glob '/usr/lib/**' product.bst
+
+# Search artifact contents (defaults to --in artifacts).
+bst-cas grep 'needle' product.bst
+
+# Inspect ELF dependencies using CAS.
+bst-cas elf product.bst --path /usr/bin/app --json
+```
+
+These wrappers run the corresponding installed `bst-blame`, `bst-grep`, or
+`bst-elf` command from PATH and preserve its arguments, output and exit status.
+They derive the CAS location automatically, with this precedence:
+
+1. `bst-cas --cas-directory DIR ...`.
+2. `BST_CAS_DIRECTORY`.
+3. `cachedir` in `$XDG_CONFIG_HOME/buildstream2.conf`, falling back to
+   `buildstream.conf` only if the versioned file does not exist; CAS is `cachedir/cas`.
+4. `$XDG_CACHE_HOME/buildstream/cas` (XDG defaults apply when unset or empty).
+
+Configuration paths support `~` and environment variables. Invalid configuration
+is an error, not a silent fallback to another cache. If you run BuildStream with
+an explicit non-default `--config` file, supply `--cas-directory` for that cache.
+The wrappers do not build, pull artifacts or modify the BuildStream cache.
+`--cas-index` is optional: the derived SQLite index uses its existing default.
+Global wrapper options go before the subcommand; tool options follow it.
+
+Automatic discovery also applies to `bst-cas index/find/stats/prune` and
+`bst-grep --in artifacts`. `bst-cas find` still searches **previously indexed
+metadata only**; use `bst-cas blame` to inspect a live project's selected artifacts.
+
+
 Shared, persistent inventories and per-file analyses for local BuildStream CAS.
 This is an independent Python project used optionally by `bst-blame`, `bst-elf`,
 `bst-grep --in artifacts`, and `bst-tree size`. The consumers still work without
@@ -25,13 +61,13 @@ bst-cas stats
 ```
 
 Each consumer also accepts `--cas-directory DIR --cas-index FILE`. CAS mode is
-opt-in through the directory flag or `BST_CAS_DIRECTORY`. The SQLite file path
+opt-in through the wrappers, directory flag or `BST_CAS_DIRECTORY` (artifact
+search in `bst-grep` always uses CAS). The SQLite file path
 alone does not enable it. With pipx, inject this package into each consumer's
 environment, for example `pipx inject bst-elf ./contrib/bst-cas`.
 
-The directory is explicit because a user's `cachedir` may differ from the
-default, and `bst` may run in a separate environment. No configuration path is
-guessed and no private BuildStream Python API is imported. Public
+Discovery reads BuildStream 2 user configuration without importing private
+BuildStream Python APIs, even when `bst` runs in a separate environment. Public
 `bst show --format '%{artifact-cas-digest}'` supplies the files-tree digest; an
 unmodified BuildStream 2.8 works. This adapter reads BuildStream's local
 `cas/objects/HH/HASH` layout and a wire-compatible projection of REAPI v2

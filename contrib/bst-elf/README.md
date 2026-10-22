@@ -146,3 +146,6 @@ continue to scan the specified tar archives.
 Shared public CLI framing, process ownership and path validation live in
 [bst-tools-core](../bst-tools-core/README.md); application packages do not import
 each other.
+
+CAS paths can also be discovered automatically from BuildStream user configuration
+using `bst-cas elf ...`; see the [CAS wrapper guide](../bst-cas/README.md#search-without-configuring-cas-paths).

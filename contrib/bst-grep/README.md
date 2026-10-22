@@ -198,3 +198,6 @@ paths, hidden files, ripgrep globs and element ownership; target symlinks are no
 followed. Results identify their tree with `origin: cas:HASH/SIZE`. This is an
 artifact search, not a persistent full-text index. Existing source/workspace and
 resolved-config searches remain live and are not cached by artifact digest.
+
+CAS paths can also be discovered automatically from BuildStream user configuration
+using `bst-cas grep ...`; see the [CAS wrapper guide](../bst-cas/README.md#search-without-configuring-cas-paths).

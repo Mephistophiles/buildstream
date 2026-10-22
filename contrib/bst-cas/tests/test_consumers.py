@@ -32,13 +32,15 @@ def project(cas, monkeypatch):
         roots = {"one.bst": root, "two.bst": root}
 
         def __init__(self, *args, **kwargs):
-            pass
+            from ruamel.yaml import YAML
+            self.yaml = YAML(typ="safe")
 
         def report(self, names, fields, *args):
             return [
                 {
                     field: {
                         "name": name,
+                    "env": "{}",
                         "kind": "stack" if name == "product.bst" else "import",
                         "full-key": "key-" + name,
                         "artifact-cas-digest": self.roots.get(name, ""),

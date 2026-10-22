@@ -19,10 +19,11 @@ import shutil
 import tempfile
 
 from .index import Index, load_artifact
+from .config import cas_directory
 
 
 def open_index(args):
-    return Index(args.cas_directory, args.cas_index)
+    return Index(cas_directory(args.cas_directory), args.cas_index)
 
 
 def elf_entries(index, entries, owner, read_elf, namespace, max_elf_size):
