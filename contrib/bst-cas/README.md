@@ -258,3 +258,30 @@ The benchmark emits JSON for single-owner and batched modes and checks their
 identities/inventory counts agree. It creates only temporary derived databases;
 it does not flush OS/BuildStream caches, build targets, pull artifacts or modify
 CAS. A live integration test also exercises this benchmark on real artifacts.
+
+## Search all locally cached sources
+
+```sh
+bst-cas grep-sources 'pthread_create'
+bst-cas grep-sources -F -i -g '*.{c,h}' --context 2 'needle'
+bst-cas grep-sources --json 'needle'
+# Equivalent direct invocation:
+bst-grep --in cached-sources 'needle'
+```
+
+No project, target or pre-indexing is required. This reads BuildStream 2
+`elementsources` and `source_protos` metadata beside the discovered CAS and
+searches available source trees with ripgrep. It does not fetch sources or
+search open workspaces, raw VCS mirrors, or source trees missing from CAS.
+For a project's current sources/workspaces use `bst-grep PATTERN TARGET.bst`.
+
+Results identify the cached source reference, file, line and column; JSON also
+includes `source_ref` and `tree_digest`. References are historical cache identities,
+not inferred current element owners. Identical trees are searched once, labelled
+with the first encountered reference. Regular files are copied into temporary
+search directories; symlinks are omitted. CAS is read-only, while inventories
+are saved in the derived index. Regex/glob validation happens before scanning.
+Missing/corrupt trees produce errors and exit 2 while other matches remain visible;
+exit 0 means matches, exit 1 means no matches in the successfully scanned cache.
+Requires `bst-grep`, `bst-cas` and `rg`; project options and targets cannot be used
+with `cached-sources`.

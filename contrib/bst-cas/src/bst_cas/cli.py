@@ -112,10 +112,10 @@ def main(argv=None):
     p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
     for command in (build, cache, find, stats, prune):
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    for name in ("blame", "grep", "elf"):
-        commands.add_parser(name, add_help=False, help=f"Run bst-{name} with automatic CAS discovery")
+    for name in ("blame", "grep", "elf", "grep-sources"):
+        commands.add_parser(name, add_help=False, help="Search all locally cached source trees" if name == "grep-sources" else f"Run bst-{name} with automatic CAS discovery")
     args, forwarded = p.parse_known_args(argv)
-    if args.command not in ("blame", "grep", "elf") and forwarded:
+    if args.command not in ("blame", "grep", "elf", "grep-sources") and forwarded:
         p.error("unrecognized arguments: " + " ".join(forwarded))
     try:
         if args.command == "find":
@@ -132,17 +132,18 @@ def main(argv=None):
                 args.command = "blame"
             elif args.directory or args.option or args.deps != "all":
                 raise ValueError("Project options require TARGET arguments")
-        if args.command in ("blame", "grep", "elf"):
+        if args.command in ("blame", "grep", "elf", "grep-sources"):
             if args.json:
                 forwarded = ["--json", *forwarded]
-            executable = shutil.which("bst-" + args.command)
+            tool = "grep" if args.command == "grep-sources" else args.command
+            executable = shutil.which("bst-" + tool)
             if executable is None:
-                raise ValueError(f"bst-{args.command} is missing from PATH; install the corresponding tool")
+                raise ValueError(f"bst-{tool} is missing from PATH; install the corresponding tool")
             environment = os.environ.copy()
             environment["BST_CAS_DIRECTORY"] = cas_directory(args.cas_directory)
             if args.cas_index:
                 environment["BST_CAS_INDEX"] = args.cas_index
-            defaults = ["--in", "artifacts"] if args.command == "grep" else []
+            defaults = ["--in", "cached-sources"] if args.command == "grep-sources" else (["--in", "artifacts"] if args.command == "grep" else [])
             return subprocess.call([executable, *defaults, *forwarded], env=environment)
         with Index(cas_directory(args.cas_directory), args.cas_index) as index:
             if args.command == "index-cache":

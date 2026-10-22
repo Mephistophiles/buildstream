@@ -54,9 +54,9 @@ def parser():
     result.add_argument(
         "--in",
         dest="area",
-        choices=("sources", "config", "artifacts"),
+        choices=("sources", "config", "artifacts", "cached-sources"),
         default="sources",
-        help="Search sources, resolved config/vars/env, or CAS artifact files (default: sources)",
+        help="Search sources, config, artifacts, or all local cached-sources (default: sources)",
     )
     result.add_argument(
         "--deps",
@@ -95,7 +95,7 @@ def parser():
     result.add_argument(
         "pattern", metavar="PATTERN", help="Ripgrep regex or literal; use -- before leading '-' patterns"
     )
-    result.add_argument("targets", nargs="+", metavar="TARGET", help="Elements, including junction-qualified names")
+    result.add_argument("targets", nargs="*", metavar="TARGET", help="Elements, including junction-qualified names")
     result.add_argument(
         "--cas-directory",
         default=os.environ.get("BST_CAS_DIRECTORY"),
@@ -156,7 +156,8 @@ class Output:
             return
         if record["type"] == "summary":
             print(
-                f"Searched {record['searched']}/{record['selected']} elements; "
+                f"Searched {record['searched']}/{record['selected']} "
+                f"{'source trees' if record.get('area') == 'cached-sources' else 'elements'}; "
                 f"{record['matched_lines']} matching lines in {record['matched_files']} files; "
                 f"{record['failed']} errors.",
                 file=sys.stderr,
@@ -271,8 +272,53 @@ def _run(args, output, cas):
     return 2 if failed else (0 if matched_lines else 1)
 
 
+def cached_sources(args, output, cas):
+    from bst_cas.cache import index_cache
+    from bst_cas.integration import artifact_files
+
+    if args.targets or args.directory or args.option or args.why or args.deps != "none":
+        raise ValueError("cached-sources searches the whole local source cache; project arguments are not supported")
+    if shutil.which("rg") is None:
+        raise ValueError("rg is missing from PATH")
+    command = rg_arguments(args)
+    validate(command)
+    matched_lines, matched_files, searched = 0, set(), 0
+    seen, reports = set(), []
+
+    def scan(ref, digest, entries):
+        nonlocal matched_lines, searched
+        identity = {"artifact-cas-digest": digest}
+        with artifact_files(cas, None, ref, loaded=(entries, identity)) as (root, origin):
+            with closing(search(root, command)) as records:
+                for record in records:
+                    record.update(element=ref, source_ref=ref, tree_digest=digest,
+                                  area="cached-sources", origin=origin)
+                    if record["type"] == "match":
+                        matched_lines += 1
+                        matched_files.add((digest, record["path"]))
+                    output.emit(record)
+        searched += 1
+
+    for name in ("elementsources", "source_protos"):
+        directory = cas.cas_directory.parent / name
+        if directory.exists():
+            reports.append(index_cache(cas, directory, sources=True, on_tree=scan, seen=seen))
+    if not reports:
+        raise ValueError("No local source metadata found (elementsources/source_protos); use bst-grep PATTERN TARGET.bst for project sources")
+    errors = [error for report in reports for error in report["errors"]]
+    for error in errors:
+        output.emit({"type": "error", "element": error["ref"], "message": error["message"]})
+    output.emit({"type": "summary", "area": "cached-sources", "complete": not errors,
+                 "selected": searched + len(errors), "searched": searched, "failed": len(errors),
+                 "matched_lines": matched_lines, "matched_files": len(matched_files),
+                 "cas_index": cas.stats()})
+    return 2 if errors else (0 if matched_lines else 1)
+
+
 def run(args, output):
-    if args.area != "artifacts":
+    if args.area != "cached-sources" and not args.targets:
+        raise ValueError("Specify at least one TARGET, or use --in cached-sources")
+    if args.area not in ("artifacts", "cached-sources"):
         # Environment configuration alone must not disable normal source search.
         if args.cas_index:
             raise ValueError("--cas-index is only used with --in artifacts")
@@ -284,7 +330,7 @@ def run(args, output):
             "Artifact search requires bst-cas; install ./contrib/bst-cas in the same environment"
         ) from error
     with open_index(args) as cas:
-        return _run(args, output, cas)
+        return cached_sources(args, output, cas) if args.area == "cached-sources" else _run(args, output, cas)
 
 
 def main(argv=None):

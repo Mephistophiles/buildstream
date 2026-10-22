@@ -54,12 +54,12 @@ def test_empty_xdg_defaults(configuration, monkeypatch):
     assert cas_directory() == str(Path.home() / '.cache/cas')
 
 
-@pytest.mark.parametrize('tool, extra', [('blame', []), ('grep', ['--in', 'artifacts']), ('elf', [])])
+@pytest.mark.parametrize('tool, extra', [('blame', []), ('grep', ['--in', 'artifacts']), ('elf', []), ('grep-sources', ['--in', 'cached-sources'])])
 def test_wrapper_preserves_arguments_and_exit(configuration, monkeypatch, tool, extra):
     import bst_cas.cli as cli
     monkeypatch.setattr(cli.shutil, 'which', lambda name: '/bin/' + name)
     def call(argv, env):
-        assert argv == ['/bin/bst-' + tool, *extra, '--json', 'needle with spaces', 'product.bst', '--deps', 'run']
+        assert argv == ['/bin/bst-' + ('grep' if tool == 'grep-sources' else tool), *extra, '--json', 'needle with spaces', 'product.bst', '--deps', 'run']
         assert env['BST_CAS_DIRECTORY'] == str(configuration / 'cache/buildstream/cas')
         assert env['BST_CAS_INDEX'] == str(configuration / 'db')
         return 2

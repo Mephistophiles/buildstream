@@ -77,3 +77,43 @@ def test_cache_empty_and_missing_refs_are_distinguished(cas, database, tmp_path,
     write_ref(refs, 'bad', version=9)
     assert main(args) == 2
     assert 'INCOMPLETE' in capsys.readouterr().out
+
+
+def test_grep_cached_sources_real_rg(cas, database, capsys):
+    from bst_cas.reapi import Source
+    from bst_grep.cli import main as grep
+    root = cas.tree(files=[('hello.c', cas.put(b'int needle;\nother line\n'), False)],
+                    links=[('escape', '/etc/passwd')])
+    source = Source()
+    source.files.hash, size = root.split('/')
+    source.files.size_bytes = int(size)
+    for name in ('elementsources', 'source_protos'):
+        directory = cas.directory.parent / name
+        directory.mkdir()
+        (directory / 'key').write_bytes(source.SerializeToString())
+    args = ['--in', 'cached-sources', '--cas-directory', str(cas.directory),
+            '--cas-index', str(database)]
+    assert grep([*args, '-g', '*.c', 'needle']) == 0
+    text = capsys.readouterr()
+    assert 'hello.c:1:5:int needle;' in text.out
+    assert '1/1 source trees' in text.err
+    assert grep([*args, '--json', '-F', 'other line']) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[0]['tree_digest'] == root and rows[0]['line'] == 2
+    assert rows[-1]['searched'] == 1 and rows[-1]['complete']
+    assert grep([*args, 'absent']) == 1
+    capsys.readouterr()
+    (cas.directory.parent / 'source_protos/bad').write_bytes(b'\xff')
+    assert grep([*args, '--json', 'needle']) == 2
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[-1]['matched_lines'] == 1 and not rows[-1]['complete']
+
+
+def test_cached_source_search_missing_metadata_and_project_args(cas, database, capsys):
+    from bst_grep.cli import main as grep
+    args = ['--in', 'cached-sources', '--cas-directory', str(cas.directory),
+            '--cas-index', str(database), '--json', 'needle']
+    assert grep(args) == 2
+    assert 'No local source metadata' in json.loads(capsys.readouterr().out)['message']
+    assert grep([*args, 'product.bst']) == 2
+    assert 'project arguments' in json.loads(capsys.readouterr().out)['message']
