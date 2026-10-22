@@ -32,8 +32,30 @@ The wrappers do not build, pull artifacts or modify the BuildStream cache.
 Global wrapper options go before the subcommand; tool options follow it.
 
 Automatic discovery also applies to `bst-cas index/find/stats/prune` and
-`bst-grep --in artifacts`. `bst-cas find` still searches **previously indexed
-metadata only**; use `bst-cas blame` to inspect a live project's selected artifacts.
+`bst-grep --in artifacts`. `bst-cas find NAME` searches **previously indexed metadata only**.
+Pass targets to search project artifacts without pre-indexing:
+
+```sh
+bst-cas find libc++.so product.bst
+bst-cas find 'libc++*' product.bst --deps run
+bst-cas find libc++.so product.bst -C /path/to/project --option arch x86-64
+bst-cas find libc++.so                  # Previously indexed trees only
+bst-cas find libc++.so --json           # Explicit machine-readable output
+bst-cas stats                          # Actual CAS/index paths and index counts
+```
+
+A name without `/` matches that basename in any directory (case-sensitive glob).
+A path with `/` is matched relative to the artifact root; a leading `/` is optional.
+Live searches use `bst-blame` and show owners and dependency paths. `--digest`
+is available only for indexed metadata searches. A complete search with no
+matches exits 1; errors/incomplete live searches exit 2.
+
+Built-in commands now print readable text by default; use `--json` before the
+subcommand or after a built-in subcommand for the versioned JSON format.
+`stats` counts **derived SQLite index** trees/analyses, not all BuildStream CAS
+objects. Zero counts do not mean the CAS is empty. Check the displayed paths;
+use a live target search to populate the index. Cached metadata search does not
+verify whether its recorded objects still exist in CAS.
 
 
 Shared, persistent inventories and per-file analyses for local BuildStream CAS.

@@ -163,7 +163,7 @@ def test_concurrent_readers_writers_and_prune_only_derived_records(cas, database
 
 def test_cli_search_is_explicitly_historical_metadata(cas, database, capsys):
     root = cas.tree(links=[("link", "/outside")])
-    args = ["--cas-directory", str(cas.directory), "--cas-index", str(database)]
+    args = ["--json", "--cas-directory", str(cas.directory), "--cas-index", str(database)]
     assert main([*args, "index", root]) == 0
     assert json.loads(capsys.readouterr().out)["entries"][0]["kind"] == "symlink"
     cas.path(root).unlink()

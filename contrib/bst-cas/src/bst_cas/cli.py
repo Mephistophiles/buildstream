@@ -32,6 +32,43 @@ def days(value):
     return number
 
 
+def search_pattern(value):
+    if not value or any(c in value for c in ("\x00", "\n", "\r")) or ".." in value.split("/"):
+        raise ValueError("Expected a filename or artifact-root path pattern without '..'")
+    return "*/" + value if "/" not in value else "/" + value.lstrip("/")
+
+
+def safe(value):
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in str(value))
+
+
+def render(query, result):
+    if query == "stats":
+        lines = [f"CAS directory: {safe(result['cas_directory'])}",
+                 f"SQLite index:  {safe(result['index_path'])}",
+                 f"Indexed trees: {result['trees']}", f"Cached analyses: {result['analyses']}",
+                 "These counts describe the derived index, not all objects in BuildStream CAS."]
+        if not result['trees']:
+            lines.append("Index is empty. Search a project: bst-cas find NAME TARGET.bst")
+        return "\n".join(lines)
+    if query in ("find", "index"):
+        lines = []
+        for entry in result['entries']:
+            lines.append(safe(entry['path']))
+            detail = f"  {entry['kind']}, {entry['size']} bytes"
+            if entry.get('link_target') is not None:
+                detail += " -> " + safe(entry['link_target'])
+            lines.append(detail)
+            lines.append("  tree: " + safe(entry.get('tree_digest', result.get('tree_digest'))))
+        lines.append(f"{len(result['entries'])} matching entries." if query == "find" else f"{len(result['entries'])} indexed entries.")
+        if query == "find":
+            lines.append("Scope: previously indexed metadata only; current CAS availability is not checked.")
+            if not result['entries']:
+                lines.append("To search project artifacts without pre-indexing: bst-cas find NAME TARGET.bst")
+        return "\n".join(lines)
+    return "Deleted index records: " + ", ".join(f"{k}={v}" for k, v in result['deleted'].items())
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="bst-cas",
@@ -51,18 +88,41 @@ def main(argv=None):
     build = commands.add_parser("index", help="Read and cache a REAPI Directory tree")
     build.add_argument("digest", help="Files tree digest HASH/SIZE from bst show artifact-cas-digest")
     find = commands.add_parser("find", help="Search indexed metadata; does not infer live owners or availability")
-    find.add_argument("pattern", help="Case-sensitive absolute-path glob")
+    find.add_argument("pattern", help="Filename or case-sensitive path glob")
+    find.add_argument("targets", nargs="*", help="Search live project artifacts instead of existing index metadata")
+    find.add_argument("-C", "--directory")
+    find.add_argument("--deps", choices=("none", "run", "build", "all"), default="all")
+    find.add_argument("--option", nargs=2, action="append", default=[])
     find.add_argument("--digest", help="Restrict search to one indexed tree")
-    commands.add_parser("stats", help="Count indexed trees and per-file analyses")
+    stats = commands.add_parser("stats", help="Show cache paths and derived-index counts")
     prune = commands.add_parser("prune", help="Remove old derived records; never remove CAS objects")
     prune.add_argument("--older-than", type=days, default=30, metavar="DAYS")
+    p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+    for command in (build, find, stats, prune):
+        command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     for name in ("blame", "grep", "elf"):
         commands.add_parser(name, add_help=False, help=f"Run bst-{name} with automatic CAS discovery")
     args, forwarded = p.parse_known_args(argv)
     if args.command not in ("blame", "grep", "elf") and forwarded:
         p.error("unrecognized arguments: " + " ".join(forwarded))
     try:
+        if args.command == "find":
+            args.pattern = search_pattern(args.pattern)
+            if args.targets:
+                if args.digest:
+                    raise ValueError("--digest cannot be combined with live targets")
+                forwarded = ["--glob", "--deps", args.deps]
+                if args.directory:
+                    forwarded += ["-C", args.directory]
+                for name, value in args.option:
+                    forwarded += ["--option", name, value]
+                forwarded += ["--", args.pattern, *args.targets]
+                args.command = "blame"
+            elif args.directory or args.option or args.deps != "all":
+                raise ValueError("Project options require TARGET arguments")
         if args.command in ("blame", "grep", "elf"):
+            if args.json:
+                forwarded = ["--json", *forwarded]
             executable = shutil.which("bst-" + args.command)
             if executable is None:
                 raise ValueError(f"bst-{args.command} is missing from PATH; install the corresponding tool")
@@ -80,16 +140,20 @@ def main(argv=None):
             elif args.command == "prune":
                 result = {"deleted": index.prune(args.older_than)}
             else:
-                result = index.stats()
-            print(json.dumps({"format_version": 1, "query": args.command, **result}, ensure_ascii=True, indent=2))
-            return 0
+                result = {**index.stats(), "cas_directory": str(index.cas_directory), "index_path": str(index.database)}
+            print(json.dumps({"format_version": 1, "query": args.command, **result}, ensure_ascii=True, indent=2)
+                  if args.json else render(args.command, result))
+            return 1 if args.command == "find" and not result["entries"] else 0
     except BrokenPipeError:
         sys.stdout = open(os.devnull, "w")
         return 0
     except KeyboardInterrupt:
         return 130
     except (OSError, ValueError) as error:
-        print(json.dumps({"format_version": 1, "error": str(error), "complete": False}))
+        if args.json:
+            print(json.dumps({"format_version": 1, "error": str(error), "complete": False}))
+        else:
+            print("bst-cas: " + safe(error), file=sys.stderr)
         return 2
 
 

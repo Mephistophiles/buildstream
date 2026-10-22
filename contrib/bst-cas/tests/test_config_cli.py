@@ -69,11 +69,58 @@ def test_wrapper_preserves_arguments_and_exit(configuration, monkeypatch, tool, 
 
 def test_discovered_cache_with_real_index(configuration, capsys):
     (configuration / 'cache/buildstream/cas/objects').mkdir(parents=True)
-    assert main(['stats']) == 0
+    assert main(['stats', '--json']) == 0
     assert json.loads(capsys.readouterr().out)['query'] == 'stats'
 
 
 def test_missing_wrapper_tool(configuration, monkeypatch, capsys):
     monkeypatch.setattr('bst_cas.cli.shutil.which', lambda name: None)
-    assert main(['blame', '/file', 'product.bst']) == 2
+    assert main(['--json', 'blame', '/file', 'product.bst']) == 2
     assert 'missing from PATH' in json.loads(capsys.readouterr().out)['error']
+
+
+def test_filename_search_text_json_and_no_match(cas, database, capsys):
+    from bst_cas import Index
+    library = cas.tree(files=[('libanswer.so', cas.put(b'ELF fixture'), False)])
+    root = cas.tree(directories=[('lib', library)])
+    with Index(cas.directory, database) as index:
+        index.tree(root)
+    args = ['--cas-directory', str(cas.directory), '--cas-index', str(database)]
+    assert main([*args, 'find', 'libanswer.so']) == 0
+    text = capsys.readouterr().out
+    assert '/lib/libanswer.so' in text and 'tree: ' + root in text
+    assert main([*args, 'find', 'libanswer*', '--json']) == 0
+    assert json.loads(capsys.readouterr().out)['entries'][0]['path'] == '/lib/libanswer.so'
+    assert main([*args, 'find', 'lib/libanswer.so']) == 0
+    capsys.readouterr()
+    assert main([*args, 'find', 'absent']) == 1
+    assert 'bst-cas find NAME TARGET.bst' in capsys.readouterr().out
+
+
+def test_stats_displays_actual_paths_and_index_scope(cas, database, capsys):
+    assert main(['--cas-directory', str(cas.directory), '--cas-index', str(database), 'stats']) == 0
+    text = capsys.readouterr().out
+    assert str(cas.directory) in text and str(database) in text
+    assert 'Indexed trees: 0' in text and 'not all objects' in text
+
+
+def test_find_live_targets_uses_blame_and_forwards_options(configuration, monkeypatch):
+    import bst_cas.cli as cli
+    monkeypatch.setattr(cli.shutil, 'which', lambda name: '/bin/' + name)
+    def call(argv, env):
+        assert argv == ['/bin/bst-blame', '--json', '--glob', '--deps', 'run',
+                        '-C', '/project', '--option', 'arch', 'arm64', '--', '*/libc++.so', 'product.bst']
+        assert env['BST_CAS_DIRECTORY'].endswith('/cache/buildstream/cas')
+        return 1
+    monkeypatch.setattr(cli.subprocess, 'call', call)
+    assert main(['find', 'libc++.so', 'product.bst', '--json', '--deps', 'run',
+                 '-C', '/project', '--option', 'arch', 'arm64']) == 1
+
+
+def test_empty_index_help_and_text_errors(cas, database, capsys):
+    args = ['--cas-directory', str(cas.directory), '--cas-index', str(database)]
+    assert main([*args, 'find', 'libc++.so']) == 1
+    assert 'previously indexed metadata' in capsys.readouterr().out
+    assert main([*args, 'find', '../lib']) == 2
+    output = capsys.readouterr()
+    assert not output.out and 'bst-cas:' in output.err
