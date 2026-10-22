@@ -43,13 +43,23 @@ def safe(value):
 
 
 def render(query, result):
+    if query == "index-cache":
+        lines = [f"CAS directory: {safe(result['cas_directory'])}",
+                 f"Artifact refs: {safe(result['refs_directory'])}",
+                 f"SQLite index:  {safe(result['index_path'])}",
+                 f"Read {result['refs']} refs; indexed {result['indexed_trees']} unique trees; "
+                 f"{result['reused_refs']} duplicate refs; {result['without_files']} without files.",
+                 "Status: " + ("complete" if result['complete'] else "INCOMPLETE")]
+        for error in result['errors']:
+            lines.append(f"  {safe(error['ref'])}: {safe(error['message'])}")
+        return "\n".join(lines)
     if query == "stats":
         lines = [f"CAS directory: {safe(result['cas_directory'])}",
                  f"SQLite index:  {safe(result['index_path'])}",
                  f"Indexed trees: {result['trees']}", f"Cached analyses: {result['analyses']}",
                  "These counts describe the derived index, not all objects in BuildStream CAS."]
         if not result['trees']:
-            lines.append("Index is empty. Search a project: bst-cas find NAME TARGET.bst")
+            lines.append("Index is empty. Run bst-cas index-cache or search a project: bst-cas find NAME TARGET.bst")
         return "\n".join(lines)
     if query in ("find", "index"):
         lines = []
@@ -87,6 +97,8 @@ def main(argv=None):
     commands = p.add_subparsers(dest="command", required=True)
     build = commands.add_parser("index", help="Read and cache a REAPI Directory tree")
     build.add_argument("digest", help="Files tree digest HASH/SIZE from bst show artifact-cas-digest")
+    cache = commands.add_parser("index-cache", help="Index all local artifact files trees without loading a project")
+    cache.add_argument("--refs-directory", help="Artifact refs override (default: sibling artifacts/refs of CAS)")
     find = commands.add_parser("find", help="Search indexed metadata; does not infer live owners or availability")
     find.add_argument("pattern", help="Filename or case-sensitive path glob")
     find.add_argument("targets", nargs="*", help="Search live project artifacts instead of existing index metadata")
@@ -98,7 +110,7 @@ def main(argv=None):
     prune = commands.add_parser("prune", help="Remove old derived records; never remove CAS objects")
     prune.add_argument("--older-than", type=days, default=30, metavar="DAYS")
     p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
-    for command in (build, find, stats, prune):
+    for command in (build, cache, find, stats, prune):
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     for name in ("blame", "grep", "elf"):
         commands.add_parser(name, add_help=False, help=f"Run bst-{name} with automatic CAS discovery")
@@ -133,7 +145,13 @@ def main(argv=None):
             defaults = ["--in", "artifacts"] if args.command == "grep" else []
             return subprocess.call([executable, *defaults, *forwarded], env=environment)
         with Index(cas_directory(args.cas_directory), args.cas_index) as index:
-            if args.command == "index":
+            if args.command == "index-cache":
+                from .cache import index_cache
+                def progress(result):
+                    if not args.json and sys.stderr.isatty() and result["refs"] % 100 == 0:
+                        print(f"Read {result['refs']} refs, indexed {result['indexed_trees']} trees...", file=sys.stderr)
+                result = index_cache(index, args.refs_directory, progress)
+            elif args.command == "index":
                 result = {"tree_digest": args.digest, "entries": index.tree(args.digest), "stats": index.stats()}
             elif args.command == "find":
                 result = {"entries": index.find(args.pattern, args.digest), "scope": "indexed-metadata-only"}
@@ -143,6 +161,8 @@ def main(argv=None):
                 result = {**index.stats(), "cas_directory": str(index.cas_directory), "index_path": str(index.database)}
             print(json.dumps({"format_version": 1, "query": args.command, **result}, ensure_ascii=True, indent=2)
                   if args.json else render(args.command, result))
+            if args.command == "index-cache" and not result["complete"]:
+                return 2
             return 1 if args.command == "find" and not result["entries"] else 0
     except BrokenPipeError:
         sys.stdout = open(os.devnull, "w")

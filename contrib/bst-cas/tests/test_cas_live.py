@@ -91,6 +91,14 @@ def test_real_buildstream_cas_shared_between_tools(tmp_path, monkeypatch, capsys
         assert index.stats()["trees"] == 1
         assert index.stats()["analyses"] == 2
 
+    from bst_cas.cli import main as cas_cli
+    scan_database = tmp_path / "whole-cache.sqlite3"
+    assert cas_cli(["--cas-index", str(scan_database), "index-cache", "--json"]) == 0
+    scan = json.loads(capsys.readouterr().out)
+    assert scan["complete"] and scan["refs"] >= 2 and scan["indexed_trees"] == 1
+    assert cas_cli(["--cas-index", str(scan_database), "find", "libdemo.so", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["entries"][0]["path"] == "/libdemo.so"
+
     from bst_cas.benchmark import measure
     from bst_tools_core.project import Project
 

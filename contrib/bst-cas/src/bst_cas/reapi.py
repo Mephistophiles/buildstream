@@ -21,11 +21,12 @@ protobuf but deliberately not interpreted; no private BuildStream imports.
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 
-def directory_class():
+def directory_class(name="Directory"):
     schema = descriptor_pb2.FileDescriptorProto(
         name="bst_cas_directory.proto", package="bst_cas.reapi", syntax="proto3"
     )
     fields = {
+        "Artifact": [("version", 1, "int32", False), ("files", 8, "Digest", False)],
         "Digest": [("hash", 1, "string", False), ("size_bytes", 2, "int64", False)],
         "FileNode": [
             ("name", 1, "string", False),
@@ -40,16 +41,19 @@ def directory_class():
             ("symlinks", 3, "SymlinkNode", True),
         ],
     }
-    types = {"string": 9, "int64": 3, "bool": 8}
-    for name, members in fields.items():
-        message = schema.message_type.add(name=name)
+    types = {"string": 9, "int64": 3, "bool": 8, "int32": 5}
+    for message_name, members in fields.items():
+        message = schema.message_type.add(name=message_name)
         for field, number, kind, repeated in members:
             value = message.field.add(name=field, number=number, label=3 if repeated else 1, type=types.get(kind, 11))
             if kind not in types:
                 value.type_name = ".bst_cas.reapi." + kind
     pool = descriptor_pool.DescriptorPool()
     pool.Add(schema)
-    return message_factory.GetMessageClass(pool.FindMessageTypeByName("bst_cas.reapi.Directory"))
+    return message_factory.GetMessageClass(pool.FindMessageTypeByName("bst_cas.reapi." + name))
 
 
 Directory = directory_class()
+
+# Projection of buildstream/v2/artifact.proto; unrelated fields are ignored.
+Artifact = directory_class("Artifact")

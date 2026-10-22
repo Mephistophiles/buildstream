@@ -1,5 +1,38 @@
 # bst-cas
 
+## Index the local artifact cache
+
+```sh
+bst-cas index-cache
+bst-cas stats
+bst-cas find 'libc++*'
+```
+
+No target or project is needed. Cache discovery follows the same configuration
+rules as the other commands. `index-cache` reads BuildStream 2 artifact metadata
+from `<cachedir>/artifacts/refs` and indexes each unique `files` Directory tree.
+Strong/weak keys and artifacts sharing a tree are deduplicated. Re-running the
+command reuses validated indexed trees. Neither the metadata nor CAS is modified;
+there is no build, checkout or network access.
+
+Text output lists the CAS, refs and SQLite paths, counts and errors. `--json`
+returns structured results. Missing/corrupt trees or metadata cause exit 2 and
+`complete: false`, while successfully indexed trees remain searchable. Empty
+refs directories complete successfully with zero counts; a missing refs
+directory is an error. Metadata without a files tree is counted separately.
+A concurrent cache cleanup may make the scan incomplete; rerun after it finishes.
+
+For a nonstandard layout:
+
+```sh
+bst-cas --cas-directory /cache/cas index-cache --refs-directory /cache/artifacts/refs
+```
+
+This indexes artifact **file inventories**, not build trees, sources, orphaned
+CAS blobs or file contents. It does not delete old index records; metadata-only
+search can still contain previously indexed trees no longer in CAS. It does not
+infer current project owners from historical artifact references.
+
 ## Search without configuring CAS paths
 
 ```sh
