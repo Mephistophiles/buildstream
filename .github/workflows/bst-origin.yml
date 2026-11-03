@@ -1,9 +1,9 @@
 name: bst-origin
 on:
   push:
-    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'tests/conftest.py', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
   pull_request:
-    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
+    paths: ['contrib/bst-tools-core/**', 'contrib/bst-tree/**', 'tests/conftest.py', 'src/buildstream/node.pyx', 'src/buildstream/_composition_history.py', 'src/buildstream/_options/optionpool.py', 'src/buildstream/_input_provenance.py', 'src/buildstream/element.py', 'src/buildstream/_context.py', 'src/buildstream/_frontend/cli.py', 'src/buildstream/_frontend/app.py', '.github/workflows/bst-origin.yml']
 permissions:
   contents: read
 jobs:
