@@ -292,8 +292,8 @@ snapshots should use the same targets, options and BuildStream version.
 Detailed snapshots may be substantially larger and can contain environment values,
 URLs or credentials present in project configuration. Treat them as project data.
 
-The inspector initially focuses on elements with **observed local changes** when
-there are any. The header always reports the total changed elements and category
+The inspector opens on **All**, with the requested targets from either snapshot
+listed first, including unchanged targets. Press **1** to focus on observed local changes. The header always reports the total changed elements and category
 counts. The left pane lists each element once. The overview on the right shows
 a short summary and a color-coded diff for each changed section except the cache key.
 Long diffs are abbreviated only in the overview. Related-element lists show up
@@ -315,8 +315,8 @@ are available in their own section, rather than filling the overview.
 `--structure-only` filters apply to the comparison and analysis. Snapshot context
 remains available for interpreting results. `--reverse` is a tree-output option
 and is rejected with the TUI. The inspector adapts to narrow terminals by stacking
-the element list above the detail pane. Identical snapshots and context-only
-changes have an explicit empty state with access to snapshot context.
+the element list above the detail pane. For identical snapshots or context-only
+changes, the targets remain selectable and the header reports zero changed elements.
 
 The categories describe **evidence, not proven causes**:
 

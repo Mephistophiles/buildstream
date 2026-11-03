@@ -45,7 +45,10 @@ async def test_diff_navigation_filters_and_sections(size):
     app = DiffExplorer(old, new)
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
-        assert app.category == "local"
+        assert app.category == "all"
+        assert app.selected_name == "app.bst"
+        await pilot.press("1")
+        await pilot.pause()
         assert app.row_names == ["tool[1].bst"]
         assert app.selected_name == "tool[1].bst"
         assert "tool[1].bst" in str(app.query_one("#selection", Static).render())
@@ -94,6 +97,8 @@ async def test_overview_highlights_both_vars_and_env():
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         assert app.query_one(Select).value == "overview"
+        await pilot.press("1")
+        await pilot.pause()
         colors = {
             segment.text: segment.style.color
             for line in app.query_one(RichLog).lines
@@ -113,9 +118,24 @@ async def test_no_changes_legacy_and_metadata_only():
     app = DiffExplorer(old, new)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.row_names == []
+        assert app.row_names == ["app.bst"]
+        detail = "\n".join(line.text for line in app.query_one(RichLog).lines)
+        assert "Before: target · manual" in detail and "After: target · manual" in detail
+        assert "No changes in the selected comparison." in detail
+        assert not app.records
         assert "unavailable" in str(app.query_one("#warning", Static).render())
         assert app.query_one(RichLog).lines
+
+
+async def test_requested_targets_from_either_snapshot():
+    old, new = pair()
+    new.targets = ["tool[1].bst"]
+    app = DiffExplorer(old, new)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.row_names == ["tool[1].bst", "app.bst", "mystery.bst"]
+        detail = "\n".join(line.text for line in app.query_one(RichLog).lines)
+        assert "Before: dependency" in detail and "After: target" in detail
 
 
 async def test_all_and_filtered_comparison():

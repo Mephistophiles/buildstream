@@ -80,7 +80,8 @@ class DiffExplorer(App):
         self.records = {r["name"]: r for r in self.report["records"]}
         self.show_all = show_all
         self.labels = labels
-        self.category = "local" if not show_all and self.report["summary"].get("local") else "all"
+        self.targets = set(old.targets) | set(new.targets)
+        self.category = "all"
         self.selected_name = None
         self.full_context = False
         self.show_history = history
@@ -175,8 +176,10 @@ class DiffExplorer(App):
         query = self.query_one(Input).value.casefold()
         priority = {"local": 0, "unknown": 1, "structural": 2, "dependency": 3, "unchanged": 4}
         names = set(self.records)
-        if self.show_all and self.category == "all":
-            names |= self.old.nodes.keys() | self.new.nodes.keys()
+        if self.category == "all":
+            names.update(self.targets)
+            if self.show_all:
+                names |= self.old.nodes.keys() | self.new.nodes.keys()
         self.row_names = sorted(
             (
                 name
@@ -184,11 +187,17 @@ class DiffExplorer(App):
                 if query in name.casefold()
                 and (self.category == "all" or self.records[name]["category"] == self.category)
             ),
-            key=lambda name: (priority[self.records.get(name, {}).get("category", "unchanged")], name),
+            key=lambda name: (
+                name not in self.targets,
+                priority[self.records.get(name, {}).get("category", "unchanged")],
+                name,
+            ),
         )
         for name in self.row_names:
             r = self.records.get(name)
             label = CATEGORY_LABELS[r["category"]] if r else "Unchanged"
+            if name in self.targets:
+                label = "Target · " + label
             if r and r["consumers"]:
                 label += f" · {r['consumer_count']} consumers"
             table.add_row(name, label, key=name)
@@ -238,6 +247,14 @@ class DiffExplorer(App):
         name = self.selected_name
         record = self.records.get(name)
         if section == "overview":
+            if name in self.targets:
+                for side, graph in (("Before", self.old), ("After", self.new)):
+                    node = graph.nodes.get(name)
+                    if node is None:
+                        log.write(f"{side}: element absent")
+                    else:
+                        role = "target" if name in graph.targets else "dependency"
+                        log.write(f"{side}: {role} · {node['kind']} · key {node['key'] or 'unresolved'}")
             if record:
                 log.write(overview(record))
                 previews = [s for s in sections(self.old, self.new, name, self.fields) if s != "key"]
