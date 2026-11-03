@@ -119,7 +119,7 @@ def test_backend_requires_fork_and_does_not_guess(monkeypatch, capsys):
     )
     assert main(["origin", "app.bst", "--path", "/env/CFLAGS", "--format", "json"]) == 2
     result = capsys.readouterr()
-    assert not result.out and "requires this fork" in result.err
+    assert not result.out and "install-bst-tools.sh --provenance" in result.err
 
 
 def test_native_serializer_preserves_real_and_synthetic_locations(tmp_path):

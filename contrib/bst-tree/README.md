@@ -12,7 +12,8 @@ For Midnight Commander panels and live project bookmarks, see
 
 For the complete suite through pipx, run `./contrib/install-bst-tools.sh`
 from the repository root. Rerun with `--force` after updating the checkout;
-use `--headless` to omit TUIs on a fresh install. See the
+use `--headless` to omit TUIs on a fresh install. Add `--provenance` to install
+the private backend for live YAML provenance and override history. See the
 [pipx installation guide](../bst-tools-core/README.md#install-from-this-checkout)
 for the shared environment and manual commands.
 
@@ -363,10 +364,9 @@ bst-tree diff before.json after.json --explain --format json
 bst-tree diff before.json after.json --tui
 ```
 
-`snapshot --provenance` implies `--details` and requires this fork's
-`bst show --provenance`. The optional snapshot `--history` additionally requires
-the rebuilt native extension described under Configuration provenance. Without
-it, winning locations and references are still captured. Provenance is queried
+`snapshot --provenance` implies `--details` and uses the private backend for
+every query in the snapshot. Add `--history` to capture the full YAML override
+chain as well as winning locations and references. Provenance is queried
 for the whole selected graph in one invocation. A repeated framed graph/details
 query detects project drift. Exact resolved details come from the provenance
 JSON export: ordinary `show` YAML is a display format that can fold strings or
@@ -591,13 +591,14 @@ For binary growth attribution, use [bst-diff --bloaty](../bst-diff/README.md).
 ## Configuration provenance
 
 ```sh
-# Requires the bst executable from this fork, including its provenance extension:
+# From this checkout, install just the private backend for an existing bst-tree:
+./contrib/bst-tree/install-provenance.sh
 bst-tree origin app.bst -C /project --path /env/CFLAGS
 bst-tree origin app.bst -C /project --path /config/build-commands --format json
 bst-tree origin app.bst -C /project --option debug True --path /vars/flags
 bst-tree origin app.bst -C /project --history --path /env/CFLAGS
 bst-tree origin app.bst -C /project --history --path /config/build-commands --format json
-bst show --deps none --provenance app.bst > origins.json
+"${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance/bst-provenance" show --deps none --provenance app.bst > origins.json
 bst-tree origin --from-report origins.json --path /env/CFLAGS --format json
 ```
 
@@ -616,10 +617,17 @@ and is incompatible with `--format`. It captures raw composed nodes only during
 explicit provenance queries, before variable expansion, so normal builds and
 existing `bst show` output do not pay the cloning cost. This is a small core
 extension because the ordinary resolved `bst show` YAML has already lost source
-locations; the frontend does not guess origins by searching `.bst` files. With an
-unextended bst executable, the command reports a clear unsupported-backend error.
-Install this fork as the environment's BuildStream (with normal BuildStream
-runtime/buildbox prerequisites); updating bst-tree alone does not update bst.
+locations; the frontend does not guess origins by searching `.bst` files.
+
+The installer creates a private virtual environment under
+`${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance`, installs
+BuildStream 2.8.0, and compiles the checkout's native history extension.
+It requires Python 3.10+, Python development headers and a C compiler.
+Install any project-specific plugins with that directory's `venv/bin/python -m pip install`.
+Rerun the installer after updating the checkout. The system `bst` stays on its
+original version. Ordinary snapshots still use `bst` on PATH. Live provenance
+also supports a patched `bst` on PATH if the private backend is absent.
+Remove the private directory to uninstall the backend, including its plugins and overlays.
 
 Every report has `format_version: 1`, `query: "input-provenance"` and `elements`.
 Entries contain the RFC 6901 `path`, unexpanded composed `raw`, resolved `value`,
@@ -647,7 +655,7 @@ remain available without requesting history. Generated scalar assignments are
 explicitly synthetic, even where BuildStream internally inherits old coordinates.
 
 ```sh
-bst show --deps none --provenance --history app.bst > history.json
+"${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance/bst-provenance" show --deps none --provenance --history app.bst > history.json
 bst-tree origin --from-report history.json --history --path /env/CFLAGS
 ```
 

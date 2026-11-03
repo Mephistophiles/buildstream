@@ -4,12 +4,13 @@ set -euo pipefail
 
 usage() {
     cat <<'HELP'
-Usage: install-bst-tools.sh [--headless] [--force]
+Usage: install-bst-tools.sh [--headless] [--provenance] [--force]
 
 Install bst-cas, bst-tree, bst-diff, bst-elf, bst-blame and bst-grep from
 this checkout. All packages share the bst-cas pipx environment.
 
   --headless  Omit optional Textual/Rich dependencies on a fresh installation.
+  --provenance  Install bst-tree's private history/provenance backend.
   --force     Reinstall packages from this checkout and replace app links.
   -h, --help  Show this help.
 
@@ -20,11 +21,13 @@ Use pipx uninstall bst-cas to remove the suite.
 HELP
 }
 
+provenance=false
 tui='[tui]'
 force=()
 for arg in "$@"; do
     case "$arg" in
         --headless) tui='' ;;
+        --provenance) provenance=true ;;
         --force) force=(--force) ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$arg" >&2; usage >&2; exit 2 ;;
@@ -57,4 +60,7 @@ for package in bst-tree bst-diff bst-elf bst-blame bst-grep; do
     UV_CONSTRAINT="$constraints${UV_CONSTRAINT:+ $UV_CONSTRAINT}" \
         pipx inject "${force[@]}" --include-apps bst-cas "$contrib_dir/$package$extras"
 done
+if "$provenance"; then
+    "$contrib_dir/bst-tree/install-provenance.sh"
+fi
 pipx list --include-injected

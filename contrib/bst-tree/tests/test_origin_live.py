@@ -23,6 +23,17 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path, monkeypatch, capsys):
+    from bst_tree.provenance import provenance_command
+
+    bst = provenance_command()[0]
+    if os.environ.get("BST_TREE_TEST_PRIVATE") == "1":
+        assert os.path.isabs(bst)
+        # Mimic an unrelated global bst. Only the private backend supports history.
+        fake = tmp_path / "bst"
+        fake.write_text("#!/bin/sh\nexit 97\n")
+        fake.chmod(0o755)
+        monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+        monkeypatch.delenv("PYTHONPATH", raising=False)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     root = tmp_path / "project"
@@ -86,13 +97,13 @@ def test_native_provenance_includes_conditions_and_transitive_variables(tmp_path
     assert entries["/config/build-commands"]["value"] == ["echo -O3 -g"]
     assert entries["/config/build-commands"]["history"][-1]["state"] == "effective"
     conflict = subprocess.run(
-        ["bst", "-C", str(root), "show", "--provenance", "--format", "%{name}", "app.bst"],
+        [bst, "-C", str(root), "show", "--provenance", "--format", "%{name}", "app.bst"],
         capture_output=True,
         text=True,
     )
     assert conflict.returncode == 2 and "cannot be combined" in conflict.stderr
     plain = subprocess.run(
-        ["bst", "-C", str(root), "show", "--deps", "none", "--format", "%{config}", "app.bst"],
+        [bst, "-C", str(root), "show", "--deps", "none", "--format", "%{config}", "app.bst"],
         capture_output=True,
         text=True,
     )

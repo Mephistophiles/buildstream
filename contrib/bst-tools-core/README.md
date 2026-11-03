@@ -26,6 +26,7 @@ Requires Python 3.10+. For pipx, run the installer from any working directory:
 ```sh
 ./contrib/install-bst-tools.sh             # All six commands, including TUIs
 ./contrib/install-bst-tools.sh --force     # Update after git pull
+./contrib/install-bst-tools.sh --force --provenance  # Also install/update the private bst-tree history backend
 # Or omit TUI dependencies on a fresh installation:
 ./contrib/install-bst-tools.sh --headless
 ```

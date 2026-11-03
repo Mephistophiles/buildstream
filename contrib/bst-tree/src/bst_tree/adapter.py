@@ -21,6 +21,7 @@ import uuid
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from .provenance import provenance_command
 from .model import DETAIL_FIELDS, Graph
 from bst_tools_core.project import command_base, parse_records, report_template
 from bst_tools_core.process import CliRunner
@@ -79,7 +80,7 @@ def capture(targets, directory=None, options=(), run=None, *, detailed=False, pr
     if history and not provenance:
         raise ValueError("--history requires --provenance")
     detailed = detailed or provenance
-    base = command_base(directory, options)
+    base = provenance_command(directory, options) if provenance else command_base(directory, options)
     run = run if run is not None else CliRunner()
 
     def execute(arguments):
@@ -127,7 +128,7 @@ def capture(targets, directory=None, options=(), run=None, *, detailed=False, pr
             )
         except ValueError as error:
             raise ValueError(
-                "Snapshot provenance requires this fork's bst show --provenance. " + str(error)
+                "Snapshot provenance requires the bst-tree backend (install-bst-tools.sh --provenance). " + str(error)
             ) from error
         graph.provenance = {
             element["element"]: {key: value for key, value in element.items() if key != "resolved_inputs"}

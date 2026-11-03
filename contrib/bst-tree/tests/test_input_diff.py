@@ -135,10 +135,14 @@ def test_lists_null_empty_added_removed_and_escaped_paths():
     assert len(changes) == 1 and count > 1
 
 
-def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch):
+def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch, tmp_path):
     old, _ = pair()
     import bst_tree.adapter as adapter
 
+    launcher = tmp_path / "bst-tree/provenance/bst-provenance"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     calls = []
     displayed = copy.deepcopy(old.details)
     displayed["app.bst"]["env"]["CFLAGS"] = None
@@ -159,6 +163,7 @@ def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch):
     result = capture(["app.bst"], run=run, provenance=True, history=True)
     assert result.details == old.details
     assert result.provenance["app.bst"]["entries"] == old.provenance["app.bst"]["entries"]
+    assert all(call[0] == str(launcher) for call in calls)
     assert len(calls) == 5 and sum("--provenance" in call for call in calls) == 1
     assert "--history" in next(call for call in calls if "--provenance" in call)
     count = 0

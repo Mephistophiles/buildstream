@@ -15,17 +15,16 @@
 
 import json
 import re
-from bst_tools_core.project import command_base
 from bst_tools_core.process import CliRunner
 from .headless import project_arguments
-from .provenance import validate_report
+from .provenance import provenance_command, validate_report
 
 
 def configure_parser(commands):
     p = commands.add_parser(
         "origin",
         help="Explain where effective config/variables/environment values came from",
-        description="Requires this fork’s bst show --provenance, or a saved provenance JSON report.",
+        description="Use the provenance backend or read a saved provenance JSON report.",
     )
     p.add_argument("element", nargs="?", help="Element, including junction qualification")
     p.add_argument(
@@ -41,7 +40,7 @@ def configure_parser(commands):
     p.add_argument(
         "--history",
         action="store_true",
-        help="Show applied YAML overrides, list composition and conditions; requires rebuilt fork bst",
+        help="Show applied YAML overrides, list composition and conditions; requires the provenance backend",
     )
     project_arguments(p)
     p.set_defaults(command="origin")
@@ -167,7 +166,7 @@ def run_origin(args):
         else:
             try:
                 text = runner(
-                    command_base(args.directory, args.option)
+                    provenance_command(args.directory, args.option)
                     + [
                         "show",
                         "--deps",
@@ -180,7 +179,7 @@ def run_origin(args):
                 ).stdout
             except ValueError as error:
                 raise ValueError(
-                    "Provenance query failed; this command requires this fork’s bst show --provenance. " + str(error)
+                    "Provenance query failed (install the backend with install-bst-tools.sh --provenance). " + str(error)
                 ) from error
             report = json.loads(text)
         report = select(

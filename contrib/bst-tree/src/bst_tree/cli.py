@@ -93,7 +93,7 @@ def parser():
             sub.add_argument(
                 "--history",
                 action="store_true",
-                help="Also capture YAML override history; requires --provenance and rebuilt fork bst",
+                help="Also capture YAML override history; requires --provenance and the provenance backend",
             )
     diff = commands.add_parser(
         "diff",

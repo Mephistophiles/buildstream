@@ -14,7 +14,21 @@
 """Shared validation for exported and snapshot input provenance."""
 
 import json
+import os
+from pathlib import Path
 import re
+
+from bst_tools_core.project import command_base
+
+
+def provenance_command(directory=None, options=()):
+    """Use the private launcher when installed, otherwise the existing bst."""
+    command = command_base(directory, options)
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share"
+    executable = Path(data_home) / "bst-tree/provenance/bst-provenance"
+    if executable.is_file():
+        command[0] = str(executable)
+    return command
 
 
 def validate_report(report):

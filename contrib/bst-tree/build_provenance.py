@@ -15,11 +15,12 @@
 
 This intentionally compiles real Cython; copying Python files cannot exercise
 composition history. Node's fields and Cython method ABI remain unchanged.
-Usage: python build_origin_runtime.py /absolute/overlay-root
+Usage: python build_provenance.py /absolute/overlay-root [launcher-path]
 """
 
 from pathlib import Path
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -30,7 +31,7 @@ from setuptools import Extension, setup
 
 os.environ.setdefault("CC", shutil.which("cc") or "gcc")
 
-repository = Path(__file__).resolve().parents[3]
+repository = Path(__file__).resolve().parents[2]
 installed = Path(buildstream.__file__).parent
 destination = Path(sys.argv[1]).resolve()
 package = destination / "buildstream"
@@ -74,5 +75,16 @@ with tempfile.TemporaryDirectory(prefix="bst-origin-cython-") as temporary:
         ),
         script_args=["build_ext", "--build-lib", str(destination), "--build-temp", temporary],
     )
+
+if len(sys.argv) == 3:
+    # Publish only after native compilation succeeds. Existing queries retain
+    # their own overlay path, including any BuildStream worker subprocesses.
+    launcher = Path(sys.argv[2])
+    with tempfile.NamedTemporaryFile("w", dir=launcher.parent, delete=False) as wrapper:
+        wrapper.write("#!/bin/sh\n")
+        wrapper.write(f'export PYTHONPATH={shlex.quote(str(destination))}${{PYTHONPATH:+":$PYTHONPATH"}}\n')
+        wrapper.write(f'exec {shlex.quote(str(Path(sys.executable).with_name("bst")))} "$@"\n')
+    os.chmod(wrapper.name, 0o755)
+    os.replace(wrapper.name, launcher)
 
 print("Origin runtime overlay: " + str(destination))

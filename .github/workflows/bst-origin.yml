@@ -20,12 +20,17 @@ jobs:
           python-version: '${{ matrix.python }}'
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap gcc
       - run: python -m pip install './contrib/bst-tools-core' './contrib/bst-tree[test,tui]' 'BuildStream==2.8.0' 'Cython>=3.1' setuptools pytest-datafiles
-      - name: Compile fork node extension and overlay fork Python modules
+      - name: Install the private provenance backend
         run: |
-          python contrib/bst-tree/tests/build_origin_runtime.py "$RUNNER_TEMP/bst-origin-runtime"
-          echo "PYTHONPATH=$RUNNER_TEMP/bst-origin-runtime" >> "$GITHUB_ENV"
+          export XDG_DATA_HOME="$RUNNER_TEMP/bst-tree-data"
+          ./contrib/bst-tree/install-provenance.sh
+          echo "XDG_DATA_HOME=$XDG_DATA_HOME" >> "$GITHUB_ENV"
+          # Native regression tests import the fork directly in the pytest process.
+          overlays=("$XDG_DATA_HOME"/bst-tree/provenance/overlay.*)
+          echo "PYTHONPATH=${overlays[0]}" >> "$GITHUB_ENV"
       - run: python -m pytest -c contrib/bst-tree/pyproject.toml contrib/bst-tree/tests/test_origin.py contrib/bst-tree/tests/test_origin_live.py contrib/bst-tree/tests/test_origin_history.py contrib/bst-tree/tests/test_input_diff.py
         env:
           BST_TREE_TEST_ORIGIN: "1"
+          BST_TREE_TEST_PRIVATE: "1"
       - name: Existing native YAML regression suite without history enabled
         run: python -m pytest -c contrib/bst-tree/pyproject.toml --basetemp "$RUNNER_TEMP/bst-origin-yaml-tests" tests/internals/yaml.py
