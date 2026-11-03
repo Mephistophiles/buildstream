@@ -8,7 +8,8 @@ if [[ ! -x "$runtime/venv/bin/python" ]]; then
     "${PIPX_DEFAULT_PYTHON:-python3}" -m venv "$runtime/venv"
 fi
 python="$runtime/venv/bin/python"
-"$python" -I -m pip install 'BuildStream==2.8.0' 'Cython>=3.1' setuptools
+"$python" -I -m pip install 'BuildStream==2.8.0' 'Cython>=3.1' setuptools \
+    'buildstream-plugins==2.7.0' 'buildstream-plugins-community==2.3.0' 'requests==2.33.1'
 overlay=$(mktemp -d "$runtime/overlay.XXXXXXXX")
 if ! "$python" -I "$source_dir/build_provenance.py" "$overlay" "$runtime/bst-provenance"; then
     rm -rf -- "$overlay"

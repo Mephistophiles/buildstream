@@ -623,7 +623,9 @@ The installer creates a private virtual environment under
 `${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance`, installs
 BuildStream 2.8.0, and compiles the checkout's native history extension.
 It requires Python 3.10+, Python development headers and a C compiler.
-Install any project-specific plugins with that directory's `venv/bin/python -m pip install`.
+The private environment includes `buildstream-plugins==2.7.0`,
+`buildstream-plugins-community==2.3.0`, and `requests==2.33.1`.
+Install additional project-specific plugins with that directory's `venv/bin/python -m pip install`.
 Rerun the installer after updating the checkout. The system `bst` stays on its
 original version. Ordinary snapshots still use `bst` on PATH. Live provenance
 also supports a patched `bst` on PATH if the private backend is absent.
