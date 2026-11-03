@@ -76,12 +76,16 @@ def parse_report(report, marker, *, detailed=False):
     return (*result, details) if detailed else result
 
 
-def capture(targets, directory=None, options=(), run=None, *, detailed=False, provenance=False, history=False):
+def capture(
+    targets, directory=None, options=(), run=None, *, detailed=False, provenance=False, history=False, output_limit=None
+):
     if history and not provenance:
         raise ValueError("--history requires --provenance")
     detailed = detailed or provenance
     base = provenance_command(directory, options) if provenance else command_base(directory, options)
-    run = run if run is not None else CliRunner()
+    if run is None:
+        default_limit = (256 if provenance else 32) * 1024 * 1024
+        run = CliRunner(limit=default_limit if output_limit is None else output_limit)
 
     def execute(arguments):
         result = run(base + arguments, stdout=subprocess.PIPE, text=True, check=False)
@@ -127,6 +131,8 @@ def capture(targets, directory=None, options=(), run=None, *, detailed=False, pr
                 )
             )
         except ValueError as error:
+            if not any(f"No such option: {flag}" in str(error) for flag in ("--provenance", "--history")):
+                raise
             raise ValueError(
                 "Snapshot provenance requires the bst-tree backend (install-bst-tools.sh --provenance). " + str(error)
             ) from error

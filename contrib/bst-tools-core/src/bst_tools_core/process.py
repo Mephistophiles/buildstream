@@ -131,7 +131,7 @@ class CliRunner:
         if result.timed_out:
             raise ValueError("BuildStream command timed out")
         if result.truncated:
-            raise ValueError("BuildStream output exceeded --output-limit; increase it and retry")
+            raise ValueError(f"BuildStream output exceeded --output-limit ({self.limit} bytes per stream); increase it and retry")
         if result.returncode:
             raise ValueError(result.stderr.strip() or f"{arguments[0]} exited {result.returncode}")
         if result.stderr:

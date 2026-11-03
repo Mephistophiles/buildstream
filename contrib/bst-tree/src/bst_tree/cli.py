@@ -23,7 +23,7 @@ from .diff import DIFF_FIELDS, compare, has_changes, render_tree
 from .model import read_snapshot, write_snapshot
 from .inspection import ProjectInspector
 from bst_tools_core.process import CliRunner
-from bst_tools_core.cli import require_tui
+from bst_tools_core.cli import positive_int, require_tui
 
 
 def parser():
@@ -79,6 +79,12 @@ def parser():
                 required=True,
                 metavar="FILE",
                 help="Output JSON snapshot; - writes stdout, otherwise replaces an existing file",
+            )
+            sub.add_argument(
+                "--output-limit",
+                type=positive_int,
+                metavar="BYTES",
+                help="Maximum bytes per bst output stream (default: 256 MiB with --provenance, 32 MiB otherwise)",
             )
             sub.add_argument(
                 "--details",
@@ -301,6 +307,7 @@ def main(argv=None):
                 args.option,
                 detailed=args.details,
                 provenance=args.provenance,
+                output_limit=args.output_limit,
                 history=args.history,
             )
             if args.output == "-":

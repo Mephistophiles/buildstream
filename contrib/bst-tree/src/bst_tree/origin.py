@@ -178,6 +178,8 @@ def run_origin(args):
                     ]
                 ).stdout
             except ValueError as error:
+                if not any(f"No such option: {flag}" in str(error) for flag in ("--provenance", "--history")):
+                    raise
                 raise ValueError(
                     "Provenance query failed (install the backend with install-bst-tools.sh --provenance). " + str(error)
                 ) from error

@@ -135,6 +135,26 @@ def test_lists_null_empty_added_removed_and_escaped_paths():
     assert len(changes) == 1 and count > 1
 
 
+@pytest.mark.parametrize("options,limit", [([], 256 * 1024 * 1024), (["--output-limit", "1024"], 1024)])
+def test_snapshot_provenance_output_limit(monkeypatch, tmp_path, capsys, options, limit):
+    from bst_tools_core.process import Execution
+
+    graph, _ = pair()
+    monkeypatch.setattr("bst_tree.adapter.parse_report", lambda *a, **kw: (graph.nodes, graph.edges, graph.details))
+
+    def run(self, command, **kwargs):
+        assert kwargs["limit"] == limit
+        return Execution(0, "app.bst", truncated="--provenance" in command)
+
+    monkeypatch.setattr("bst_tools_core.process.CommandRunner.__call__", run)
+    output = tmp_path / "snapshot.json"
+    output.write_text("previous snapshot")
+    assert main(["snapshot", "app.bst", "--provenance", "--history", *options, "-o", str(output)]) == 2
+    error = capsys.readouterr().err
+    assert "--output-limit" in error and str(limit) in error
+    assert "install-bst-tools" not in error and output.read_text() == "previous snapshot"
+
+
 def test_snapshot_capture_validates_details_and_rejects_drift(monkeypatch, tmp_path):
     old, _ = pair()
     import bst_tree.adapter as adapter

@@ -365,7 +365,9 @@ bst-tree diff before.json after.json --tui
 ```
 
 `snapshot --provenance` implies `--details` and uses the private backend for
-every query in the snapshot. Add `--history` to capture the full YAML override
+every query in the snapshot. Each query can capture up to 256 MiB per output stream
+with provenance or 32 MiB otherwise. For larger graphs, pass e.g.
+`--output-limit 536870912` (512 MiB) to `bst-tree snapshot`. Add `--history` to capture the full YAML override
 chain as well as winning locations and references. Provenance is queried
 for the whole selected graph in one invocation. A repeated framed graph/details
 query detects project drift. Exact resolved details come from the provenance
