@@ -296,7 +296,8 @@ The inspector opens on **All**, with the requested targets from either snapshot
 listed first, including unchanged targets. Press **1** to focus on observed local changes. The header always reports the total changed elements and category
 counts. The left pane lists each element once. The overview on the right shows
 a short summary and a color-coded diff for each changed section except the cache key.
-Long diffs are abbreviated only in the overview. Related-element lists show up
+Within replacement lines, changed words and punctuation have a contrasting background
+in both the overview and the full section diff. Long diffs are abbreviated only in the overview. Related-element lists show up
 to 100 entries with exact total counts; JSON explanation exports the full lists.
 Observed local origins are listed before intermediary keys.
 Use the section picker to view the complete selected section. Cache-key hashes

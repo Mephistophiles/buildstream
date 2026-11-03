@@ -13,6 +13,9 @@
 #
 """Progressive disclosure for snapshot comparisons: overview, then one section's diff."""
 
+from difflib import SequenceMatcher
+import re
+
 from bst_tools_core.ui import diff_text
 from textual import on
 from textual.app import App, ComposeResult
@@ -22,6 +25,34 @@ from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, S
 
 from .explain import CATEGORY_LABELS, analyze, overview, sections, unified
 from .input_diff import input_changes, render_inputs
+
+
+def word_diff_text(content):
+    """Emphasize changed words inside each replacement block of a unified diff."""
+    result = diff_text(content)
+    removed, added = [], []
+
+    def highlight_replacement():
+        if removed and added:
+            matcher = SequenceMatcher(None, [t[0] for t in removed], [t[0] for t in added])
+            for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+                if tag != "equal":
+                    for _, start, stop in removed[old_start:old_end] + added[new_start:new_end]:
+                        result.stylize("bold reverse", start, stop)
+        removed.clear()
+        added.clear()
+
+    offset = 0
+    for line in result.plain.splitlines(keepends=True):
+        if line.startswith(("---", "+++", "@@")) or not line.startswith(("-", "+")):
+            highlight_replacement()
+        else:
+            tokens = removed if line.startswith("-") else added
+            for token in re.finditer(r"\w+|[^\S\n]+|[^\w\s]", line[1:]):
+                tokens.append((token.group(), offset + 1 + token.start(), offset + 1 + token.end()))
+        offset += len(line)
+    highlight_replacement()
+    return result
 
 
 class DiffExplorer(App):
@@ -264,7 +295,7 @@ class DiffExplorer(App):
                     line_limit = 45 // len(previews)
                     for changed_section in previews:
                         lines = unified(self.old, self.new, name, changed_section, fields=self.fields).splitlines()
-                        log.write(diff_text("\n".join(lines[:line_limit])))
+                        log.write(word_diff_text("\n".join(lines[:line_limit])))
                         if len(lines) > line_limit:
                             log.write(f"… Select {changed_section} for the full diff.")
                 if record.get("input_changes"):
@@ -273,7 +304,7 @@ class DiffExplorer(App):
             else:
                 log.write("No changes in the selected comparison." if name else "No matching changed elements.")
                 log.write("\n" + "\n".join(self.report["warnings"]))
-                log.write(diff_text(unified(self.old, self.new, None, "context")))
+                log.write(word_diff_text(unified(self.old, self.new, None, "context")))
         elif section == "sources" and name is not None:
             changes, _ = input_changes(self.old, self.new, name, history=self.show_history)
             log.write(render_inputs(changes, history=self.show_history, limit=None, source_limit=None))
@@ -294,10 +325,10 @@ class DiffExplorer(App):
                     log.write(consumer)
         elif section == "context":
             log.write("\n".join(self.report["warnings"]) + "\n")
-            log.write(diff_text(unified(self.old, self.new, None, "context", full=self.full_context)))
+            log.write(word_diff_text(unified(self.old, self.new, None, "context", full=self.full_context)))
         elif name is not None and section is not Select.BLANK:
             log.write(
-                diff_text(unified(self.old, self.new, name, section, full=self.full_context, fields=self.fields))
+                word_diff_text(unified(self.old, self.new, name, section, full=self.full_context, fields=self.fields))
             )
             if record and section in ("config", "vars", "env", "public"):
                 changes, _ = input_changes(self.old, self.new, name, history=self.show_history)

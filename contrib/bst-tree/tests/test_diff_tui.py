@@ -99,15 +99,17 @@ async def test_overview_highlights_both_vars_and_env():
         assert app.query_one(Select).value == "overview"
         await pilot.press("1")
         await pilot.pause()
-        colors = {
-            segment.text: segment.style.color
-            for line in app.query_one(RichLog).lines
-            for segment in line
-            if segment.style and segment.style.color
-        }
-        for prefix, value in (("-", "-O2"), ("+", "-O3")):
-            assert colors[f'{prefix}  "opt": "{value}"'] == colors[f'{prefix}  "CFLAGS": "{value}"']
-        assert colors['-  "CFLAGS": "-O2"'] != colors['+  "CFLAGS": "-O3"']
+        for section in ("overview", "env"):
+            app.query_one(Select).value = section
+            await pilot.pause()
+            lines = app.query_one(RichLog).lines
+            for prefix, value in (("-", "O2"), ("+", "O3")):
+                keys = ("opt", "CFLAGS") if section == "overview" else ("CFLAGS",)
+                for key in keys:
+                    line = next(line for line in lines if line.text == f'{prefix}  "{key}": "-{value}"')
+                    assert [seg.text for seg in line if seg.style and seg.style.reverse] == [value]
+            colors = {seg.text: seg.style.color for line in lines for seg in line if seg.text in ("O2", "O3")}
+            assert colors["O2"] != colors["O3"]
 
 
 async def test_no_changes_legacy_and_metadata_only():
