@@ -83,6 +83,28 @@ async def test_diff_navigation_filters_and_sections(size):
         assert app.is_running
 
 
+async def test_overview_highlights_both_vars_and_env():
+    old, new = pair()
+    name = "tool[1].bst"
+    old.details[name]["vars"]["opt"] = "-O2"
+    new.details[name]["vars"]["opt"] = "-O3"
+    old.details[name]["env"]["CFLAGS"] = "-O2"
+
+    app = DiffExplorer(old, new)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.query_one(Select).value == "overview"
+        colors = {
+            segment.text: segment.style.color
+            for line in app.query_one(RichLog).lines
+            for segment in line
+            if segment.style and segment.style.color
+        }
+        for prefix, value in (("-", "-O2"), ("+", "-O3")):
+            assert colors[f'{prefix}  "opt": "{value}"'] == colors[f'{prefix}  "CFLAGS": "{value}"']
+        assert colors['-  "CFLAGS": "-O2"'] != colors['+  "CFLAGS": "-O3"']
+
+
 async def test_no_changes_legacy_and_metadata_only():
     old, new = pair()
     old.details = new.details = None

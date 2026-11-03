@@ -294,8 +294,9 @@ URLs or credentials present in project configuration. Treat them as project data
 
 The inspector initially focuses on elements with **observed local changes** when
 there are any. The header always reports the total changed elements and category
-counts. The left pane lists each element once; the right pane shows a short
-summary and one small diff. Long diffs are abbreviated only in the overview. Related-element lists show up
+counts. The left pane lists each element once. The overview on the right shows
+a short summary and a color-coded diff for each changed section except the cache key.
+Long diffs are abbreviated only in the overview. Related-element lists show up
 to 100 entries with exact total counts; JSON explanation exports the full lists.
 Observed local origins are listed before intermediary keys.
 Use the section picker to view the complete selected section. Cache-key hashes

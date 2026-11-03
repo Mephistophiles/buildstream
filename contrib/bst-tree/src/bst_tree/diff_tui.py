@@ -240,19 +240,19 @@ class DiffExplorer(App):
         if section == "overview":
             if record:
                 log.write(overview(record))
+                previews = [s for s in sections(self.old, self.new, name, self.fields) if s != "key"]
+                if previews:
+                    log.write("\nSection diffs · f opens a full diff\n")
+                    # Share the overview's line budget so a large section can't hide later changes.
+                    line_limit = 45 // len(previews)
+                    for changed_section in previews:
+                        lines = unified(self.old, self.new, name, changed_section, fields=self.fields).splitlines()
+                        log.write(diff_text("\n".join(lines[:line_limit])))
+                        if len(lines) > line_limit:
+                            log.write(f"… Select {changed_section} for the full diff.")
                 if record.get("input_changes"):
                     log.write("\nInput sources · choose Sources for all inputs; h toggles YAML history\n")
                     log.write(render_inputs(record["input_changes"], limit=2, source_limit=3))
-                changed_sections = sections(self.old, self.new, name, self.fields)
-                # Show one small diff immediately; hashes stay behind the section picker.
-                first = next((s for s in changed_sections if s != "key"), None)
-                if first:
-                    log.write("\nChanged section: " + first + " · f selects another section\n")
-                    content = unified(self.old, self.new, name, first, fields=self.fields)
-                    lines = content.splitlines()
-                    log.write(diff_text("\n".join(lines[:45])))
-                    if len(lines) > 45:
-                        log.write("… Select this section for the full diff.")
             else:
                 log.write("No changes in the selected comparison." if name else "No matching changed elements.")
                 log.write("\n" + "\n".join(self.report["warnings"]))
