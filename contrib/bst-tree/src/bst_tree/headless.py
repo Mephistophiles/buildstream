@@ -14,6 +14,7 @@
 """Deterministic graph queries without a terminal or Textual."""
 
 from collections import deque
+from dataclasses import replace
 import json
 import sys
 
@@ -92,7 +93,81 @@ def configure_parser(commands):
     from .headless_inspection import configure_parser as configure_inspection
 
     configure_inspection(commands)
+    for command in ("path", "chains"):
+        sub = commands.add_parser(
+            command,
+            help=(
+                "Show dependency chains between two elements"
+                if command == "chains"
+                else "Show a shortest dependency path between two elements"
+            ),
+            description=(
+                "List simple dependency chains from FROM to TO."
+                if command == "chains"
+                else "Find one shortest directed path from FROM to TO, following dependencies."
+            ),
+            epilog=f"Examples: bst-tree {command} app.bst lib.bst -C /project; "
+            f"bst-tree {command} tool.bst lib.bst --snapshot graph.json. "
+            "Exit status: 0 path found, 1 no path, 2 error.",
+        )
+        sub.add_argument("source", metavar="FROM", help="Exact starting element name")
+        sub.add_argument("element", metavar="TO", help="Exact destination element name")
+        sub.add_argument("--snapshot", metavar="FILE", help="Read a saved graph without bst (- reads stdin)")
+        sub.add_argument(
+            "--scope",
+            choices=("all", "run", "build"),
+            default="all",
+            help="Dependency scope relative to FROM (default: all)",
+        )
+        if command == "chains":
+            sub.add_argument(
+                "--max-chains",
+                type=positive_int,
+                default=1000,
+                metavar="N",
+                help="Maximum chains to print (default: 1000; truncation exits 3)",
+            )
+        project_arguments(sub)
+        sub.set_defaults(command=command, targets=[])
+        parsers[command] = sub
     return parsers
+
+
+def dependency_chains(graph, source, destination, limit):
+    """Enumerate simple paths iteratively, pruning nodes that cannot reach TO."""
+    if limit < 1:
+        raise ValueError("max_chains must be positive")
+    if destination not in graph.nodes:
+        return [], False
+    reverse = graph.adjacency(reverse=True)
+    reachable = {destination}
+    queue = deque([destination])
+    while queue:
+        for parent, _ in reverse[queue.popleft()]:
+            if parent not in reachable:
+                reachable.add(parent)
+                queue.append(parent)
+    if source not in reachable:
+        return [], False
+    adjacency = graph.adjacency()
+    path, active, results = [source], {source}, []
+    stack = [iter(adjacency[source])]
+    while stack:
+        if path[-1] == destination:
+            if len(results) == limit:
+                return results, True
+            results.append(list(path))
+            child = None
+        else:
+            child = next(stack[-1], None)
+        if child is None:
+            stack.pop()
+            active.remove(path.pop())
+        elif child[0] in reachable and child[0] not in active:
+            path.append(child[0])
+            active.add(child[0])
+            stack.append(iter(adjacency[child[0]]))
+    return results, False
 
 
 def subset(graph, names, roots, edges=None):
@@ -110,22 +185,33 @@ def subset(graph, names, roots, edges=None):
     )
 
 
-def query_graph(graph, command, *, scope="all", element=None, match=None, direct=False):
+def query_graph(graph, command, *, scope="all", element=None, match=None, direct=False, source=None, max_chains=1000):
     if element is not None and element not in graph.nodes:
         raise ValueError(f"Element is absent from the loaded graph: {element}")
+    if command in ("path", "chains"):
+        if source not in graph.nodes:
+            raise ValueError(f"Element is absent from the loaded graph: {source}")
+        # Scope must be relative to the selected source, not snapshot roots.
+        graph = replace(graph, targets=[source])
     view = graph.scoped(scope)
     report = {"format_version": 1, "query": command, "scope": scope, "requested_targets": sorted(graph.targets)}
     if element is not None:
         report["element"] = element
         report["in_scope"] = element in view.nodes
-    if command == "paths":
+    if command in ("path", "chains"):
+        report["source"] = source
+    if command in ("paths", "path", "chains"):
+        paths = view.paths_to(element)
+        if command == "chains":
+            paths, truncated = dependency_chains(view, source, element, max_chains)
+            report.update(max_chains=max_chains, truncated=truncated)
         report["paths"] = [
             {
                 "target": path[0],
                 "nodes": path,
                 "edges": [{"from": a, "to": b, "types": sorted(view.edges[a, b])} for a, b in zip(path, path[1:])],
             }
-            for path in view.paths_to(element)
+            for path in paths
         ]
         return report
     roots = list(view.targets)
@@ -166,7 +252,9 @@ def query_graph(graph, command, *, scope="all", element=None, match=None, direct
 
 
 def render_graph(report):
-    if report["query"] == "paths":
+    if report["query"] == "chains":
+        return "\n".join(" -> ".join(p["nodes"]) for p in report["paths"])
+    if report["query"] in ("paths", "path"):
         return "\n".join(" -> ".join(p["nodes"]) for p in report["paths"]) or "No paths in the selected scope."
     graph = report["graph"]
     reverse = report["query"] == "rdeps"
@@ -202,8 +290,9 @@ def render_graph(report):
 def run_graph_query(args):
     if args.snapshot and (args.targets or args.directory or args.option):
         raise ValueError("--snapshot cannot be combined with live targets or project arguments")
-    if not args.snapshot and not args.targets:
+    if not args.snapshot and not args.targets and args.command not in ("path", "chains"):
         raise ValueError(args.command + " requires graph targets or --snapshot")
+    targets = list(dict.fromkeys([args.source, args.element])) if args.command in ("path", "chains") else args.targets
     runner = CliRunner(args.timeout, args.output_limit)
     try:
         if args.snapshot == "-":
@@ -212,7 +301,7 @@ def run_graph_query(args):
             graph = (
                 read_snapshot(args.snapshot)
                 if args.snapshot
-                else capture(args.targets, args.directory, args.option, run=runner)
+                else capture(targets, args.directory, args.option, run=runner)
             )
         report = query_graph(
             graph,
@@ -221,12 +310,19 @@ def run_graph_query(args):
             element=getattr(args, "element", None),
             match=getattr(args, "match", None),
             direct=getattr(args, "direct", False),
+            source=getattr(args, "source", None),
+            max_chains=getattr(args, "max_chains", 1000),
         )
-        print(
+        output = (
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
             if args.format == "json"
             else render_graph(report)
         )
-        return 0
+        if output:
+            print(output)
+        if report.get("truncated"):
+            print("bst-tree: chain limit reached; increase --max-chains for more results", file=sys.stderr)
+            return 3
+        return 1 if args.command in ("path", "chains") and not report["paths"] else 0
     finally:
         runner.cancel()

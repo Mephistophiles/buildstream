@@ -278,3 +278,23 @@ def test_live_headless_artifact_inspection(tmp_path, monkeypatch, capsys):
         assert sizes["coverage"]["complete"] and sizes["total"]["file_bytes"] == 13
     finally:
         inspector.cancel()
+
+
+@pytest.mark.skipif(
+    os.environ.get("BST_TREE_TEST_LIVE") != "1", reason="Set BST_TREE_TEST_LIVE=1 with bst/buildbox installed"
+)
+def test_live_point_to_point_path(tmp_path, monkeypatch, capsys):
+    from bst_tree.cli import main
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    elements = tmp_path / "elements"
+    elements.mkdir()
+    (tmp_path / "project.conf").write_text("name: path-test\nmin-version: '2.0'\nelement-path: elements\n")
+    (elements / "app.bst").write_text("kind: stack\ndepends:\n- mid.bst\n")
+    (elements / "mid.bst").write_text("kind: stack\ndepends:\n- lib.bst\n")
+    (elements / "lib.bst").write_text("kind: stack\n")
+    assert main(["path", "app.bst", "lib.bst", "-C", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.strip() == "app.bst -> mid.bst -> lib.bst"
+    assert main(["path", "lib.bst", "app.bst", "-C", str(tmp_path)]) == 1
+    assert "No paths" in capsys.readouterr().out

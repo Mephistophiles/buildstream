@@ -553,11 +553,43 @@ from human-readable text. `--limit BYTES` defaults to 256 KiB. Source listings h
 structured type/mode/size fields; artifact listings preserve BuildStream's long
 metadata in `details`, alongside `path` and `directory`.
 
-All four commands accept `--timeout SECONDS` (default 120 per bst invocation)
+The graph query and inspection commands accept `--timeout SECONDS` (default 120 per bst invocation)
 and `--output-limit BYTES` (default 32 MiB per captured stream). Overflow is an
 error rather than a silently partial graph or inspection. Cancellation and timeout
 terminate the owned subprocess group. These limits do not cap the size of a saved
 graph read from disk or stdin, or the number of source files listed locally.
+
+### Path between two elements
+
+```sh
+bst-tree path app.bst lib.bst -C /project
+bst-tree path tool.bst lib.bst --snapshot graph.json
+bst-tree path tool.bst lib.bst --snapshot graph.json --scope run --format json
+```
+
+`path FROM TO` finds one shortest directed path, following consumer-to-dependency
+edges. Both endpoints may be any exact element names in the graph, including
+junction-qualified names; FROM need not be a snapshot root. Live mode loads both
+endpoints and their dependencies. Snapshot mode also accepts `--snapshot -` for
+stdin, and cannot be combined with `-C` or `--option`.
+
+Unlike `paths`, which queries all saved roots, `path` applies `--scope` relative
+to FROM: `all` follows all dependencies, `run` follows runtime dependencies, and
+`build` follows direct build dependencies and their runtime closure. Equal-length
+routes are selected deterministically. Cycles are safe; identical endpoints
+produce a one-node path. JSON includes `source`, `element`, and a `paths` list
+with ordered `nodes` and typed `edges`. Exit status is 0 when a path exists,
+1 when no path exists in the selected scope, and 2 for errors such as an absent
+element. An empty `paths` list represents no path.
+
+### Snapshot timeout
+
+`snapshot` defaults to **300 seconds (5 minutes) per bst invocation**, including
+detail, provenance and history capture. Override it with `--timeout SECONDS`:
+
+```sh
+bst-tree snapshot app.bst -o graph.json --timeout 600
+```
 
 ## Artifact and closure sizes
 
@@ -714,3 +746,28 @@ CAS mode currently applies to `size`. It uses logical file sizes and SHA-256 CAS
 digests for content uniqueness; it does not measure compressed or reclaimable
 CAS disk space. `coverage.cas_index` includes reuse statistics. Offline archive
 inputs and artifact comparison continue to use their existing archive readers.
+
+### Plain dependency chains
+
+```sh
+bst-tree chains app.bst lib.bst -C /project
+bst-tree chains app.bst lib.bst --snapshot graph.json
+bst-tree chains app.bst lib.bst --snapshot graph.json --max-chains 10000
+```
+
+`chains FROM TO` prints simple directed dependency paths, one per line, without
+headings or tree decoration:
+
+```text
+app.bst -> mid.bst -> lib.bst
+app.bst -> tool.bst -> lib.bst
+```
+
+Unlike `path`, this includes longer alternative routes. Nodes never repeat within
+a chain, so cycles do not produce infinite output. Routes have deterministic
+lexicographic traversal order, not length order. The default limit is 1000 chains;
+`--max-chains N` changes it. If more chains exist, the command prints the bounded
+result, warns on stderr and exits 3. JSON (`--format json`) includes `paths`,
+`max_chains` and `truncated`. Exit 0 means complete results, 1 means no chain
+(empty text stdout), and 2 means an error. Scope, project options, exact element
+names and snapshot/stdin input work as for `path`.

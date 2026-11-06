@@ -373,3 +373,117 @@ def test_graph_options_may_precede_or_follow_live_targets(command, element, monk
     )
     assert calls == [(["app", "other"], "/project", [["arch", "aarch64"]])]
     assert json.loads(capsys.readouterr().out)["query"] == command
+
+
+def test_point_to_point_path_is_shortest_directed_and_cycle_safe():
+    g = graph()
+    g.edges["lib", "app"] = frozenset(["run"])
+    report = query_graph(g, "path", source="tool", element="lib")
+    assert report["paths"][0]["nodes"] == ["tool", "lib"]
+    assert report["paths"][0]["edges"] == [{"from": "tool", "to": "lib", "types": ["run"]}]
+    assert g.targets == ["app", "other"]
+    assert query_graph(g, "path", source="lib", element="other")["paths"] == []
+    assert query_graph(g, "path", source="tool", element="tool")["paths"][0]["nodes"] == ["tool"]
+    assert query_graph(graph(), "path", source="lib", element="tool")["paths"] == []
+    assert query_graph(graph(), "path", source="app", element="lib")["paths"][0]["nodes"] == ["app", "mid", "lib"]
+    for source, destination in [("missing", "lib"), ("tool", "missing")]:
+        with pytest.raises(ValueError, match="absent"):
+            query_graph(g, "path", source=source, element=destination)
+
+
+def test_path_scope_is_relative_to_source():
+    g = graph()
+    assert query_graph(g, "path", source="tool", element="bootstrap", scope="build")["paths"][0]["nodes"] == [
+        "tool",
+        "bootstrap",
+    ]
+    assert query_graph(g, "path", source="tool", element="bootstrap", scope="run")["paths"] == []
+    assert query_graph(g, "path", source="tool", element="lib", scope="run")["paths"][0]["nodes"] == ["tool", "lib"]
+    assert query_graph(g, "path", source="tool", element="lib", scope="build")["paths"] == []
+
+
+def test_path_cli_snapshot_stdin_and_exit_codes(tmp_path, monkeypatch, capsys):
+    import io
+
+    path = tmp_path / "graph.json"
+    write_snapshot(graph(), path)
+    assert main(["path", "tool", "--snapshot", str(path), "lib"]) == 0
+    assert capsys.readouterr().out.strip() == "tool -> lib"
+    assert main(["path", "lib", "tool", "--snapshot", str(path)]) == 1
+    assert "No paths" in capsys.readouterr().out
+    assert main(["path", "missing", "tool", "--snapshot", str(path)]) == 2
+    assert "absent" in capsys.readouterr().err
+    assert main(["path", "tool", "lib", "--snapshot", str(path), "-C", "/project"]) == 2
+    assert "cannot be combined" in capsys.readouterr().err
+    monkeypatch.setattr(sys, "stdin", io.StringIO(path.read_text()))
+    assert main(["path", "tool", "lib", "--snapshot", "-", "--format", "json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["source"] == "tool" and report["element"] == "lib"
+    assert report["paths"][0]["nodes"] == ["tool", "lib"]
+
+
+def test_path_cli_live_capture(monkeypatch, capsys):
+    calls = []
+
+    def capture(targets, directory, options, *, run):
+        calls.append((targets, directory, options, run.timeout))
+        return graph()
+
+    monkeypatch.setattr("bst_tree.headless.capture", capture)
+    assert main(["path", "tool", "-C", "/project", "lib", "--option", "arch", "aarch64", "--timeout", "42"]) == 0
+    assert calls == [(["tool", "lib"], "/project", [["arch", "aarch64"]], 42)]
+    assert capsys.readouterr().out.strip() == "tool -> lib"
+
+
+@pytest.mark.parametrize("flags,expected", [([], 300), (["--timeout", "42"], 42)])
+def test_snapshot_timeout_reaches_capture(monkeypatch, capsys, flags, expected):
+    def capture(*args, **kwargs):
+        assert kwargs["timeout"] == expected
+        return graph()
+
+    monkeypatch.setattr("bst_tree.cli.capture", capture)
+    assert main(["snapshot", "app", "-o", "-", *flags]) == 0
+    assert json.loads(capsys.readouterr().out)["targets"]
+
+
+def test_chains_enumerate_routes_and_bound_cycles():
+    g = graph()
+    g.edges["lib", "app"] = frozenset(["run"])
+    result = query_graph(g, "chains", source="app", element="lib")
+    assert [p["nodes"] for p in result["paths"]] == [["app", "mid", "lib"], ["app", "tool", "lib"]]
+    assert not result["truncated"]
+    limited = query_graph(g, "chains", source="app", element="lib", max_chains=1)
+    assert len(limited["paths"]) == 1 and limited["truncated"]
+    assert not query_graph(g, "chains", source="app", element="lib", max_chains=2)["truncated"]
+    assert query_graph(g, "chains", source="app", element="app")["paths"][0]["nodes"] == ["app"]
+    assert query_graph(g, "chains", source="app", element="other")["paths"] == []
+    assert query_graph(g, "chains", source="tool", element="bootstrap", scope="run")["paths"] == []
+    assert query_graph(g, "chains", source="tool", element="bootstrap", scope="build")["paths"][0]["nodes"] == [
+        "tool",
+        "bootstrap",
+    ]
+
+
+def test_chains_cli_plain_output_and_truncation(tmp_path, capsys):
+    path = tmp_path / "graph.json"
+    write_snapshot(graph(), path)
+    args = ["chains", "app", "lib", "--snapshot", str(path)]
+    assert main(args) == 0
+    assert capsys.readouterr().out == "app -> mid -> lib\napp -> tool -> lib\n"
+    assert main(args + ["--max-chains", "1"]) == 3
+    output = capsys.readouterr()
+    assert output.out == "app -> mid -> lib\n" and "limit reached" in output.err
+    assert main(args + ["--max-chains", "1", "--format", "json"]) == 3
+    assert json.loads(capsys.readouterr().out)["truncated"] is True
+    assert main(["chains", "lib", "app", "--snapshot", str(path)]) == 1
+    assert capsys.readouterr().out == ""
+    with pytest.raises(SystemExit):
+        main(args + ["--max-chains", "0"])
+
+
+def test_chains_long_path_without_recursion():
+    from bst_tree.headless import dependency_chains
+
+    names = [str(i) for i in range(1500)]
+    g = Graph([names[0]], dict.fromkeys(names, {}), {(a, b): frozenset(["run"]) for a, b in zip(names, names[1:])}, {})
+    assert dependency_chains(g, names[0], names[-1], 1) == ([names], False)

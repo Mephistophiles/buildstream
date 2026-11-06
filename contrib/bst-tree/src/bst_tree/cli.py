@@ -23,7 +23,7 @@ from .diff import DIFF_FIELDS, compare, has_changes, render_tree
 from .model import read_snapshot, write_snapshot
 from .inspection import ProjectInspector
 from bst_tools_core.process import CliRunner
-from bst_tools_core.cli import positive_int, require_tui
+from bst_tools_core.cli import positive_float, positive_int, require_tui
 
 
 def parser():
@@ -73,6 +73,13 @@ def parser():
                 help="Browse saved JSON without bst; cannot be combined with project arguments",
             )
         else:
+            sub.add_argument(
+                "--timeout",
+                type=positive_float,
+                default=300,
+                metavar="SECONDS",
+                help="Timeout per bst command (default: 300)",
+            )
             sub.add_argument(
                 "-o",
                 "--output",
@@ -200,7 +207,7 @@ def main(argv=None):
             from .size import run_size
 
             return run_size(args)
-        if args.command in ("tree", "rdeps", "paths"):
+        if args.command in ("tree", "rdeps", "paths", "path", "chains"):
             from .headless import run_graph_query
 
             return run_graph_query(args)
@@ -309,6 +316,7 @@ def main(argv=None):
                 provenance=args.provenance,
                 output_limit=args.output_limit,
                 history=args.history,
+                timeout=args.timeout,
             )
             if args.output == "-":
                 print(json.dumps(graph.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))

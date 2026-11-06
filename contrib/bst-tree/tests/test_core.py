@@ -389,3 +389,23 @@ def test_cli_color_and_reverse(tmp_path, capsys, monkeypatch, mode, tty, no_colo
     output = capsys.readouterr().out
     assert "\033[" not in output
     assert json.loads(output) == compare(old, new)
+
+
+@pytest.mark.parametrize("timeout", [300, 42])
+def test_capture_passes_timeout_to_each_subprocess(monkeypatch, timeout):
+    from bst_tools_core.process import Execution
+
+    calls = []
+
+    def execute(self, arguments, **kwargs):
+        calls.append(kwargs["timeout"])
+        if "--version" in arguments:
+            return Execution(0, "bst test\n")
+        if "all" in arguments:
+            fmt = arguments[arguments.index("--format") + 1]
+            return Execution(0, report(fmt.split("record\n")[0]))
+        return Execution(0, "app.bst\n")
+
+    monkeypatch.setattr("bst_tools_core.process.CommandRunner.__call__", execute)
+    assert capture(["app.bst"], **({} if timeout == 300 else {"timeout": timeout})).targets == ["app.bst"]
+    assert calls == [timeout] * 3

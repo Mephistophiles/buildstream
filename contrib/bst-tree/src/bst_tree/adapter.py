@@ -77,7 +77,16 @@ def parse_report(report, marker, *, detailed=False):
 
 
 def capture(
-    targets, directory=None, options=(), run=None, *, detailed=False, provenance=False, history=False, output_limit=None
+    targets,
+    directory=None,
+    options=(),
+    run=None,
+    *,
+    detailed=False,
+    provenance=False,
+    history=False,
+    output_limit=None,
+    timeout=300,
 ):
     if history and not provenance:
         raise ValueError("--history requires --provenance")
@@ -85,7 +94,7 @@ def capture(
     base = provenance_command(directory, options) if provenance else command_base(directory, options)
     if run is None:
         default_limit = (256 if provenance else 32) * 1024 * 1024
-        run = CliRunner(limit=default_limit if output_limit is None else output_limit)
+        run = CliRunner(timeout=timeout, limit=default_limit if output_limit is None else output_limit)
 
     def execute(arguments):
         result = run(base + arguments, stdout=subprocess.PIPE, text=True, check=False)
