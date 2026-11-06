@@ -771,3 +771,59 @@ result, warns on stderr and exits 3. JSON (`--format json`) includes `paths`,
 `max_chains` and `truncated`. Exit 0 means complete results, 1 means no chain
 (empty text stdout), and 2 means an error. Scope, project options, exact element
 names and snapshot/stdin input work as for `path`.
+
+### Rebuild selection for one target
+
+```sh
+# Unique elements on ALL image -> vfs paths, dependencies first:
+bst-tree rebuild image.bst vfs.bst -C /project
+# vfs.bst somepkg.bst image.bst
+
+# Show the corresponding chains:
+bst-tree rebuild image.bst vfs.bst --snapshot graph.json --format chains
+# image.bst -> somepkg.bst -> vfs.bst
+
+bst-tree rebuild image.bst vfs.bst --snapshot graph.json --format json
+```
+
+`rebuild TARGET CHANGED` selects the union of dependency paths from TARGET to
+CHANGED, including both endpoints. It excludes unrelated branches of the image,
+consumers outside that target, and dependencies below CHANGED that are not on a
+selected path. Shared intermediates appear once. The default `--format elements`
+is a space-separated, shell-quoted list for pasting after `bst build`, ordered
+with dependencies before consumers. It does not enumerate paths to build this
+list, so graphs with many alternative routes do not cause exponential output.
+Cycles within the selected subgraph are errors; unrelated cycles are ignored.
+
+`--format chains` prints the paths in consumer-to-dependency direction, with the
+same `--max-chains` limit and exit-3 truncation behavior as `chains`. This limit
+never truncates `elements` or JSON. JSON includes `target`, `changed`, `elements`,
+typed `edges`, and `cache_checked: false`. No connection gives empty text stdout
+and exit 1; an unknown endpoint gives exit 2. Live mode, saved snapshots, stdin,
+project options and `--scope` are supported as for `path` (default scope: `all`).
+
+This is a **structural candidate selection**, not a cache-aware build plan.
+It includes runtime as well as build dependencies in the default scope and does
+not inspect whether artifacts are already current. BuildStream `--no-strict`
+may reuse an existing weak-key artifact even when that element is explicitly
+listed in `bst build`. Pasting this list into that command therefore does not
+force rebuilding the selected elements. The command does not delete artifacts,
+modify dependency strictness or launch builds. Missing dependencies outside the
+selection can still require building when BuildStream executes a build.
+
+### Project option shorthand
+
+Like `bst`, `bst-tree` accepts repeatable `-o NAME VALUE` / `--option NAME VALUE`
+before the command. Live query commands and `browse` also accept both spellings
+after the command. Global options come first; command-local options come after.
+
+```sh
+bst-tree -o arch aarch64 rebuild image.bst vfs.bst -C /project
+bst-tree rebuild image.bst vfs.bst -o arch aarch64 -C /project
+bst-tree -o arch aarch64 snapshot image.bst -o graph.json
+```
+
+For compatibility, **`snapshot -o FILE` still means output**. Use the global
+`bst-tree -o NAME VALUE snapshot ...` form, or `snapshot --option NAME VALUE`,
+for snapshot project options. Project options cannot be used with saved snapshots
+or `diff`, which do not load a live project.

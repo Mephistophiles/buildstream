@@ -24,10 +24,16 @@ from bst_tools_core.cli import positive_float, positive_int
 from .model import Graph, read_snapshot
 
 
-def project_arguments(sub):
+def project_arguments(sub, *, formats=("text", "json"), default_format="text"):
     sub.add_argument("-C", "--directory", help="BuildStream project directory (default: current directory)")
     sub.add_argument(
-        "--option", nargs=2, action="append", default=[], metavar=("NAME", "VALUE"), help="Project option; repeatable"
+        "-o",
+        "--option",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("NAME", "VALUE"),
+        help="Project option; repeatable",
     )
     sub.add_argument(
         "--timeout", type=positive_float, default=120, metavar="SECONDS", help="Timeout per bst command (default: 120)"
@@ -41,9 +47,9 @@ def project_arguments(sub):
     )
     sub.add_argument(
         "--format",
-        choices=("text", "json"),
-        default="text",
-        help="Output format (default: text); no terminal required",
+        choices=formats,
+        default=default_format,
+        help=f"Output format (default: {default_format}); no terminal required",
     )
 
 
@@ -93,18 +99,26 @@ def configure_parser(commands):
     from .headless_inspection import configure_parser as configure_inspection
 
     configure_inspection(commands)
-    for command in ("path", "chains"):
+    for command in ("path", "chains", "rebuild"):
         sub = commands.add_parser(
             command,
             help=(
-                "Show dependency chains between two elements"
-                if command == "chains"
-                else "Show a shortest dependency path between two elements"
+                "List elements on dependency paths to an updated element"
+                if command == "rebuild"
+                else (
+                    "Show dependency chains between two elements"
+                    if command == "chains"
+                    else "Show a shortest dependency path between two elements"
+                )
             ),
             description=(
-                "List simple dependency chains from FROM to TO."
-                if command == "chains"
-                else "Find one shortest directed path from FROM to TO, following dependencies."
+                "Select rebuild candidates on all paths from target FROM to changed element TO."
+                if command == "rebuild"
+                else (
+                    "List simple dependency chains from FROM to TO."
+                    if command == "chains"
+                    else "Find one shortest directed path from FROM to TO, following dependencies."
+                )
             ),
             epilog=f"Examples: bst-tree {command} app.bst lib.bst -C /project; "
             f"bst-tree {command} tool.bst lib.bst --snapshot graph.json. "
@@ -119,7 +133,7 @@ def configure_parser(commands):
             default="all",
             help="Dependency scope relative to FROM (default: all)",
         )
-        if command == "chains":
+        if command in ("chains", "rebuild"):
             sub.add_argument(
                 "--max-chains",
                 type=positive_int,
@@ -127,7 +141,10 @@ def configure_parser(commands):
                 metavar="N",
                 help="Maximum chains to print (default: 1000; truncation exits 3)",
             )
-        project_arguments(sub)
+        if command == "rebuild":
+            project_arguments(sub, formats=("elements", "chains", "json"), default_format="elements")
+        else:
+            project_arguments(sub)
         sub.set_defaults(command=command, targets=[])
         parsers[command] = sub
     return parsers
@@ -188,7 +205,7 @@ def subset(graph, names, roots, edges=None):
 def query_graph(graph, command, *, scope="all", element=None, match=None, direct=False, source=None, max_chains=1000):
     if element is not None and element not in graph.nodes:
         raise ValueError(f"Element is absent from the loaded graph: {element}")
-    if command in ("path", "chains"):
+    if command in ("path", "chains", "rebuild"):
         if source not in graph.nodes:
             raise ValueError(f"Element is absent from the loaded graph: {source}")
         # Scope must be relative to the selected source, not snapshot roots.
@@ -198,8 +215,13 @@ def query_graph(graph, command, *, scope="all", element=None, match=None, direct
     if element is not None:
         report["element"] = element
         report["in_scope"] = element in view.nodes
-    if command in ("path", "chains"):
+    if command in ("path", "chains", "rebuild"):
         report["source"] = source
+    if command == "rebuild":
+        from .rebuild import rebuild_report
+
+        report.update(rebuild_report(view, source, element))
+        return report
     if command in ("paths", "path", "chains"):
         paths = view.paths_to(element)
         if command == "chains":
@@ -290,9 +312,13 @@ def render_graph(report):
 def run_graph_query(args):
     if args.snapshot and (args.targets or args.directory or args.option):
         raise ValueError("--snapshot cannot be combined with live targets or project arguments")
-    if not args.snapshot and not args.targets and args.command not in ("path", "chains"):
+    if not args.snapshot and not args.targets and args.command not in ("path", "chains", "rebuild"):
         raise ValueError(args.command + " requires graph targets or --snapshot")
-    targets = list(dict.fromkeys([args.source, args.element])) if args.command in ("path", "chains") else args.targets
+    targets = (
+        list(dict.fromkeys([args.source, args.element]))
+        if args.command in ("path", "chains", "rebuild")
+        else args.targets
+    )
     runner = CliRunner(args.timeout, args.output_limit)
     try:
         if args.snapshot == "-":
@@ -313,6 +339,10 @@ def run_graph_query(args):
             source=getattr(args, "source", None),
             max_chains=getattr(args, "max_chains", 1000),
         )
+        if args.command == "rebuild":
+            from .rebuild import render_rebuild
+
+            return render_rebuild(report, graph, args)
         output = (
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
             if args.format == "json"
@@ -323,6 +353,6 @@ def run_graph_query(args):
         if report.get("truncated"):
             print("bst-tree: chain limit reached; increase --max-chains for more results", file=sys.stderr)
             return 3
-        return 1 if args.command in ("path", "chains") and not report["paths"] else 0
+        return 1 if args.command in ("path", "chains", "rebuild") and not report["paths"] else 0
     finally:
         runner.cancel()

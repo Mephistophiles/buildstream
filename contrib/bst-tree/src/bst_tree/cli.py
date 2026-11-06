@@ -32,6 +32,15 @@ def parser():
         description="Explore BuildStream dependency graphs and compare portable JSON snapshots.",
         epilog="Run bst-tree COMMAND --help for examples and command options.",
     )
+    result.add_argument(
+        "-o",
+        "--option",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("NAME", "VALUE"),
+        help="Project option; may precede the command and be repeated",
+    )
     commands = result.add_subparsers(dest="command", required=True)
     for command in ("browse", "snapshot"):
         description = (
@@ -59,7 +68,7 @@ def parser():
         )
         sub.add_argument("-C", "--directory", help="Project directory (default: current directory)")
         sub.add_argument(
-            "--option",
+            *(("--option",) if command == "snapshot" else ("-o", "--option")),
             nargs=2,
             action="append",
             default=[],
@@ -192,6 +201,18 @@ def parser():
 def main(argv=None):
     arguments = parser()
     values = sys.argv[1:] if argv is None else argv
+    # Parse only options before COMMAND. REMAINDER leaves subcommand options
+    # untouched, notably snapshot -o FILE, whose meaning must remain compatible.
+    prefix = argparse.ArgumentParser(prog="bst-tree", add_help=False)
+    prefix.add_argument("-o", "--option", nargs=2, action="append", default=[])
+    prefix.add_argument("-h", "--help", action="store_true")
+    prefix.add_argument("command", nargs="?")
+    prefix.add_argument("arguments", nargs=argparse.REMAINDER)
+    global_args = prefix.parse_args(values)
+    if global_args.help:
+        arguments.print_help()
+        return 0
+    values = ([global_args.command] + global_args.arguments) if global_args.command else []
     if values and values[0] in arguments.headless_parsers:
         # Parse the selected graph command directly: older argparse versions
         # otherwise reject targets placed after options following ELEMENT.
@@ -199,6 +220,10 @@ def main(argv=None):
     else:
         args = arguments.parse_args(values)
     try:
+        if global_args.option:
+            if args.command == "diff":
+                raise ValueError("--option is not supported by diff")
+            args.option = global_args.option + args.option
         if args.command == "origin":
             from .origin import run_origin
 
@@ -207,7 +232,7 @@ def main(argv=None):
             from .size import run_size
 
             return run_size(args)
-        if args.command in ("tree", "rdeps", "paths", "path", "chains"):
+        if args.command in ("tree", "rdeps", "paths", "path", "chains", "rebuild"):
             from .headless import run_graph_query
 
             return run_graph_query(args)
