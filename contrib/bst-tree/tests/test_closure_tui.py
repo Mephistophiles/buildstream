@@ -128,6 +128,8 @@ async def test_alternate_runtime_path_preserves_closure_but_not_the_declared_edg
         app.query_one(Input).value = "lib.bst"
         await pilot.pause()
         assert rows(app.query_one(DataTable)) == [["=", "run", "run", "lib.bst"]]
+        assert "Roles in scope   run" in detail(app)
+        assert "run → run" not in detail(app)
         assert "After  app.bst → linux-base.bst → lib.bst" in detail(app)
         await pilot.press("e")
         assert rows(app.query_one(DataTable)) == [["-", "run", "none", "app.bst → lib.bst"]]

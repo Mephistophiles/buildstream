@@ -22,7 +22,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
-from .semantic import LABELS, NOTE, ROLES, declared_edge_label, role_label, role_summary
+from .semantic import LABELS, NOTE, ROLES, declared_edge_label, role_label, role_summary, role_transition
 
 
 class SemanticScreen(Screen):
@@ -136,7 +136,8 @@ class SemanticScreen(Screen):
         for name in self.row_names:
             record = self.records[name]
             mark = {"added": "+", "removed": "-", "role_changed": "~", "retained": "=", "unchanged": " "}[record["change"]]
-            table.add_row(name, f"{mark} {role_label(record['old'])} → {role_label(record['new'])}", key=name)
+            transition = role_transition(record["old"], record["new"], arrow=" → ")
+            table.add_row(name, f"{mark} {transition}", key=name)
         if self.row_names:
             index = self.row_names.index(previous) if previous in self.row_names else 0
             table.move_cursor(row=index)
@@ -206,12 +207,12 @@ class SemanticScreen(Screen):
             routes = self.model.route_changes(self.target, record["name"], record["role"])
             log.write(f"Changed effective routes: {len(routes)} (showing up to 100).\n")
             for edge in routes[:100]:
-                log.write(f"{edge['from']} → {edge['to']}\n"
-                          f"  {role_label(edge['old'])} → {role_label(edge['new'])}; "
-                          f"affects {role_label(edge['roles'])}")
+                transition = role_transition(edge["old"], edge["new"], arrow=" → ")
+                log.write(f"{edge['from']} → {edge['to']}\n  {transition} · affects {role_label(edge['roles'])}")
         else:
             log.write(LABELS[record["change"]] + "\n")
-            log.write(f"Roles: {role_label(record['old'])} → {role_label(record['new'])}\n")
+            transition = role_transition(record["old"], record["new"], arrow=" → ")
+            log.write(f"Roles: {transition}\n")
             self.write_paths(log, record, full=section == "paths")
             if record["change"] == "retained":
                 log.write("\nDeclared routes changed; this dependency remains reachable with the same roles. "

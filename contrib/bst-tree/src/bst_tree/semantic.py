@@ -31,6 +31,11 @@ def role_label(roles):
     return "/".join(roles) or "none"
 
 
+def role_transition(before, after, *, arrow=" -> "):
+    old, new = role_label(before), role_label(after)
+    return old if old == new else old + arrow + new
+
+
 class SemanticDiff:
     """Cache compact closures; compute witness paths only when requested."""
 
@@ -303,7 +308,8 @@ def has_semantic_changes(report):
 
 
 def declared_edge_label(edge):
-    return f"{edge['from']} -> {edge['to']} [{role_label(edge['old'])} -> {role_label(edge['new'])}]"
+    transition = role_transition(edge["old"], edge["new"])
+    return f"{edge['from']} -> {edge['to']} [{transition}]"
 
 
 def role_summary(role, counts):
@@ -341,7 +347,7 @@ def render_semantic(report, *, color=False):
                 lines.append(f"  {LABELS[category]} ({count}):")
                 mark = {"added": "+", "removed": "-", "retained": "=", "unchanged": " "}[category]
                 for record in entries:
-                    transition = role_label(record["old"]) + " -> " + role_label(record["new"])
+                    transition = role_transition(record["old"], record["new"])
                     lines.append(paint(f"    {mark} {record['name']}{suffix} [{transition}]", category))
                 if len(entries) < count:
                     lines.append(f"    … {count - len(entries)} more. Use --format json or --tui.")

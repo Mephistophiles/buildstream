@@ -20,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.widgets import DataTable, Footer, Input, RichLog, Select, Static, Tab, Tabs
 
-from .semantic import CATEGORIES, LABELS, ROLES, role_label, role_summary
+from .semantic import CATEGORIES, LABELS, ROLES, role_label, role_summary, role_transition
 
 MARKS = {"added": "+", "removed": "-", "role_changed": "~", "retained": "=", "unchanged": "·"}
 COLORS = {"added": "green", "removed": "red", "role_changed": "yellow", "retained": "cyan", "unchanged": "dim"}
@@ -213,15 +213,15 @@ class ClosureDiffApp(App):
             return
         self._selected = record
         detail.clear()
-        before, after = (role_label(record[side]) for side in ("old", "new"))
+        transition = role_transition(record["old"], record["new"], arrow=" → ")
         target, scope, edges = self._source_key
         if edges:
             detail.write(Text(f"{record['from']} → {record['to']}", style="bold"))
             label = "Declared types" if scope == "all" else "Route roles"
-            detail.write(f"{label}   {before} → {after}")
+            detail.write(f"{label}   {transition}")
             if record["to"] != target:
                 roles = self.model.roles(target, record["to"], scope)
-                detail.write(f"Closure roles    {role_label(roles[0])} → {role_label(roles[1])}")
+                detail.write(f"Closure roles    {role_transition(*roles, arrow=' → ')}")
             return
 
         role = record["role"]
@@ -229,7 +229,7 @@ class ClosureDiffApp(App):
         label = f"{name}@{role}" if scope == "all" else name
         detail.write(Text(label, style="bold"))
         detail.write(Text(LABELS[record["change"]], style=COLORS[record["change"]]))
-        detail.write(f"Roles in scope   {before} → {after}")
+        detail.write(f"Roles in scope   {transition}")
 
         detail.write(Text(f"{role.capitalize()} witness paths", style="bold"))
         for side, label in enumerate(("Before", "After")):
@@ -240,7 +240,7 @@ class ClosureDiffApp(App):
         if routes:
             detail.write(Text(f"Changed route edges ({len(routes)})", style="bold"))
             for edge in routes[:50]:
-                types = f"{role_label(edge['old'])} → {role_label(edge['new'])}"
+                types = role_transition(edge["old"], edge["new"], arrow=" → ")
                 detail.write(f"  {edge['from']} → {edge['to']}   [{types}]")
             if len(routes) > 50:
                 detail.write(f"  … {len(routes) - 50} more. Search in Declared edges.")

@@ -39,7 +39,10 @@ def test_removed_direct_dependency_stays_reachable_via_another_path():
     assert model.path(0, "app", "lib", "run") == ["app", "lib"]
     assert model.path(1, "app", "lib", "run") == ["app", "mid", "lib"]
     assert not has_semantic_changes(model.report())
-    assert "Still reachable (1)" in render_semantic(model.report())
+    output = render_semantic(model.report())
+    assert "Still reachable (1)" in output
+    assert "= lib@run [run]" in output
+    assert "run -> run" not in output
     assert model.route_changes("app", "lib")[0]["from"] == "app"
 
 

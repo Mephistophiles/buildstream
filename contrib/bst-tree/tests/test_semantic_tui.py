@@ -47,6 +47,7 @@ async def test_semantic_screen_paths_targets_scopes_and_return(size):
         assert screen.category == "retained"
         assert screen.row_names == ["lib[1]@run"]
         assert screen.selected_name == "lib[1]@run"
+        assert screen.query_one(DataTable).get_row_at(0)[1] == "= run"
         screen.query_one("#sem-section", Select).value = "paths"
         await pilot.pause()
         assert screen.query_one(RichLog).lines
