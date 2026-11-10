@@ -22,7 +22,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
-from .semantic import LABELS, NOTE, declared_edge_label, role_label
+from .semantic import LABELS, NOTE, ROLES, declared_edge_label, role_label, role_summary
 
 
 class SemanticScreen(Screen):
@@ -113,13 +113,17 @@ class SemanticScreen(Screen):
         previous = self.selected_name
         table = self.query_one(DataTable)
         table.clear()
-        self.records = {r["name"]: r for r in self.model.changes(self.target, self.scope, show_all=self.show_all)} if self.target else {}
-        counts = {c: mask.bit_count() for c, mask in self.model.masks(self.target, self.scope).items()} if self.target else {}
-        self.query_one("#sem-summary", Static).update(
-            f"+{counts.get('added', 0)} added  ·  -{counts.get('removed', 0)} removed  ·  "
-            f"~{counts.get('role_changed', 0)} roles  ·  ={counts.get('retained', 0)} still reachable  ·  "
-            f"{len(self.model.declared_edges(self.scope, target=self.target or None))} declared edge changes"
-        )
+        self.records = {}
+        counts = {}
+        summary = "No common requested targets"
+        if self.target:
+            counts = self.model.counts(self.target, self.scope)
+            for record in self.model.role_records(self.target, self.scope, show_all=self.show_all):
+                suffix = f"@{record['role']}" if self.scope == "all" else ""
+                self.records[record["name"] + suffix] = record
+            roles = ROLES if self.scope == "all" else (self.scope,)
+            summary = "\n".join(role_summary(role, self.model.counts(self.target, role)) for role in roles)
+        self.query_one("#sem-summary", Static).update(summary)
         if reset_category:
             effects = sum(counts.get(c, 0) for c in ("added", "removed", "role_changed"))
             self.category = "retained" if not effects and counts.get("retained") else "effects"
@@ -186,7 +190,8 @@ class SemanticScreen(Screen):
                                                    ensure_ascii=False, sort_keys=True, indent=2))
         elif section == "declared":
             edges = self.model.declared_edges(self.scope, target=self.target or None)
-            log.write(f"Declared edge changes ({len(edges)}):\n")
+            label = "Declared edge changes" if self.scope == "all" else f"@{self.scope} route edge changes"
+            log.write(f"{label} ({len(edges)}):\n")
             for edge in edges:
                 log.write(declared_edge_label(edge))
         elif record is None:
@@ -198,7 +203,7 @@ class SemanticScreen(Screen):
                 log.write("Targets only in old: " + ", ".join(self.model.targets_removed))
             log.write("\n" + NOTE)
         elif section == "routes":
-            routes = self.model.route_changes(self.target, record["name"], self.scope)
+            routes = self.model.route_changes(self.target, record["name"], record["role"])
             log.write(f"Changed effective routes: {len(routes)} (showing up to 100).\n")
             for edge in routes[:100]:
                 log.write(f"{edge['from']} → {edge['to']}\n"

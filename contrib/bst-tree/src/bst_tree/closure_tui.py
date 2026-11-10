@@ -20,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.widgets import DataTable, Footer, Input, RichLog, Select, Static, Tab, Tabs
 
-from .semantic import CATEGORIES, LABELS, role_label
+from .semantic import CATEGORIES, LABELS, ROLES, role_label, role_summary
 
 MARKS = {"added": "+", "removed": "-", "role_changed": "~", "retained": "=", "unchanged": "·"}
 COLORS = {"added": "green", "removed": "red", "role_changed": "yellow", "retained": "cyan", "unchanged": "dim"}
@@ -90,7 +90,7 @@ class ClosureDiffApp(App):
             )
         yield Tabs(Tab("Closure effects", id="closure"), Tab("Declared edges", id="edges"), id="views")
         with Horizontal(id="filters"):
-            categories = [c for c in CATEGORIES if self.show_all or c != "unchanged"]
+            categories = [c for c in CATEGORIES if c != "role_changed" and (self.show_all or c != "unchanged")]
             yield Select(
                 [("All changes" if not self.show_all else "All dependencies", "all")]
                 + [(LABELS[c], c) for c in categories],
@@ -138,17 +138,18 @@ class ClosureDiffApp(App):
         scope = self.query_one("#scope", Select)
         category = self.query_one("#category", Select)
         edges = self.query_one(Tabs).active == "edges"
-        scope.disabled = category.disabled = edges or not target
-        key = target, None if edges else scope.value
+        scope.disabled = not target
+        category.disabled = edges or not target
+        key = target, scope.value, edges
         if key != self._source_key:
             self._source_key = key
             self._selected = None
             if not target:
                 self._records = []
             elif edges:
-                self._records = self.model.declared_changes(target)
+                self._records = self.model.declared_changes(target, scope.value)
             else:
-                self._records = self.model.changes(target, scope.value, show_all=self.show_all)
+                self._records = self.model.role_records(target, scope.value, show_all=self.show_all)
 
         search = self.query_one(Input).value.casefold()
         visible = []
@@ -163,6 +164,8 @@ class ClosureDiffApp(App):
         selected_index = 0
         for record in self._records:
             label = f"{record['from']} → {record['to']}" if edges else record["name"]
+            if not edges and scope.value == "all":
+                label += f"@{record['role']}"
             if search not in label.casefold() or (not edges and category.value not in ("all", record["change"])):
                 continue
             if record is self._selected:
@@ -178,14 +181,11 @@ class ClosureDiffApp(App):
             )
         self._visible = visible
         if edges:
-            summary = f"{len(visible)}/{len(self._records)} declared edge changes · all dependency types"
+            label = "declared edge changes" if scope.value == "all" else f"@{scope.value} route edge changes"
+            summary = f"{len(visible)}/{len(self._records)} {label}"
         elif target:
-            counts = self.model.masks(target, scope.value)
-            summary = (
-                f"{len(visible)}/{len(self._records)} shown   +{counts['added'].bit_count()} added   "
-                f"-{counts['removed'].bit_count()} removed   ~{counts['role_changed'].bit_count()} roles   "
-                f"={counts['retained'].bit_count()} routes"
-            )
+            roles = ROLES if scope.value == "all" else (scope.value,)
+            summary = "\n".join(role_summary(role, self.model.counts(target, role)) for role in roles)
         else:
             summary = "The snapshots have no common requested target"
         self.query_one("#summary", Static).update(summary)
@@ -214,32 +214,29 @@ class ClosureDiffApp(App):
         self._selected = record
         detail.clear()
         before, after = (role_label(record[side]) for side in ("old", "new"))
-        if "from" in record:
+        target, scope, edges = self._source_key
+        if edges:
             detail.write(Text(f"{record['from']} → {record['to']}", style="bold"))
-            detail.write(f"Declared types   {before} → {after}")
-            target, _ = self._source_key
+            label = "Declared types" if scope == "all" else "Route roles"
+            detail.write(f"{label}   {before} → {after}")
             if record["to"] != target:
-                roles = self.model.roles(target, record["to"])
+                roles = self.model.roles(target, record["to"], scope)
                 detail.write(f"Closure roles    {role_label(roles[0])} → {role_label(roles[1])}")
             return
 
-        target, scope = self._source_key
+        role = record["role"]
         name = record["name"]
-        detail.write(Text(name, style="bold"))
+        label = f"{name}@{role}" if scope == "all" else name
+        detail.write(Text(label, style="bold"))
         detail.write(Text(LABELS[record["change"]], style=COLORS[record["change"]]))
         detail.write(f"Roles in scope   {before} → {after}")
-        if scope != "all":
-            full_before, full_after = self.model.roles(target, name)
-            detail.write(f"All roles        {role_label(full_before)} → {role_label(full_after)}")
 
-        for role in ("run", "build"):
-            if role in record["old"] or role in record["new"]:
-                detail.write(Text(f"{role.capitalize()} witness paths", style="bold"))
-                for side, label in enumerate(("Before", "After")):
-                    path = self.model.path(side, target, name, role)
-                    detail.write(f"  {label}  " + (" → ".join(path) if path else "unreachable"))
+        detail.write(Text(f"{role.capitalize()} witness paths", style="bold"))
+        for side, label in enumerate(("Before", "After")):
+            path = self.model.path(side, target, name, role)
+            detail.write(f"  {label}  " + (" → ".join(path) if path else "unreachable"))
 
-        routes = self.model.route_changes(target, name, scope)
+        routes = self.model.route_changes(target, name, role)
         if routes:
             detail.write(Text(f"Changed route edges ({len(routes)})", style="bold"))
             for edge in routes[:50]:

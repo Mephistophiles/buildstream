@@ -256,7 +256,16 @@ def test_cli_semantic_json_color_filters_and_validation(tmp_path, capsys):
     assert report["summary"]["role_changed"] == 1
     assert "explanation" in report
     assert main(["diff", str(a), str(b), "--semantic", "--color", "always"]) == 0
-    assert "\033[33m" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "@build  +1 -0 packages" in output
+    assert "@run  +0 -1 packages" in output
+    assert "\033[32m    + lib@build [none -> build]" in output
+    assert "\033[31m    - lib@run [run -> none]" in output
+    assert report["summary_by_role"]["build"]["added"] == 1
+    assert report["summary_by_role"]["run"]["removed"] == 1
+    assert report["targets"][0]["by_role"]["run"]["changes"] == [
+        {"name": "lib", "change": "removed", "old": ["run"], "new": []}
+    ]
     args = ["diff", str(a), str(b), "--scope", "run", "--target", "app", "--check"]
     assert main(args) == 1
     assert "- lib [run -> none]" in capsys.readouterr().out
@@ -290,10 +299,11 @@ def test_cli_runtime_diff_from_a_dependency_of_the_snapshot_root(tmp_path, capsy
     assert "- bootstrap.bst [run -> none]" in output
     assert "- gcc.bst [run -> none]" in output
     assert "+ linux-base.bst [none -> run]" in output
-    assert "linux-toolchain.bst" not in output.split("Declared edge changes", 1)[0]
+    assert "linux-toolchain.bst" not in output
+    assert "@run  +1 -2 packages" in output
 
 
-def test_scoped_diff_shows_declared_edges_outside_the_runtime_closure(tmp_path, capsys):
+def test_scoped_diff_ignores_edges_outside_the_selected_closure(tmp_path, capsys):
     import json
     from bst_tree.cli import main
     from bst_tree.model import write_snapshot
@@ -321,19 +331,31 @@ def test_scoped_diff_shows_declared_edges_outside_the_runtime_closure(tmp_path, 
         assert main([*args, "--format", layout]) == 0
         output = capsys.readouterr().out
         assert "No dependency membership or role changes" in output
-        assert "Declared edge changes (4)" in output
-        assert "delivery.bst -> toolchain.bst [build/run -> build]" in output
-        assert "delivery.bst -> linux-base.bst [build -> build/run]" in output
-        assert "delivery.bst -> bootstrap.bst [run -> none]" in output
-        assert "new-tool.bst" not in output
+        assert "@run  +0 -0 packages" in output
+        assert "toolchain.bst" not in output
+        assert "bootstrap.bst" not in output
 
     assert main([*args, "--target", "delivery.bst", "--format", "json"]) == 1
     report = json.loads(capsys.readouterr().out)
-    assert report["declared_edge_count"] == 3
-    assert {edge["from"] for edge in report["declared_edges"]} == {"delivery.bst"}
+    assert report["declared_edges"] == [
+        {"from": "delivery.bst", "to": "bootstrap.bst", "old": ["run"], "new": []},
+        {"from": "delivery.bst", "to": "linux-base.bst", "old": [], "new": ["run"]},
+        {"from": "delivery.bst", "to": "toolchain.bst", "old": ["run"], "new": []},
+    ]
     model = SemanticDiff(old, new)
-    assert len(model.report("run", limit=1)["declared_edges"]) == 1
-    assert len(model.report("run", limit=1, show_all=True)["declared_edges"]) == 4
+    assert model.report("run")["declared_edges"] == []
+    build_report = model.report("build")
+    assert build_report["summary"]["removed"] == 2
+    assert build_report["summary"]["added"] == 1
+    assert len(build_report["declared_edges"]) == 4
+    assert all(
+        set(edge["old"] + edge["new"]) == {"build"} for edge in build_report["declared_edges"]
+    )
+    assert model.report("all")["declared_edge_count"] == 5
+    assert "Declared edge changes (5)" in render_semantic(model.report("all"))
+    assert "Declared edge changes" not in render_semantic(build_report)
+    assert len(model.report("all", limit=1)["declared_edges"]) == 1
+    assert len(model.report("all", limit=1, show_all=True)["declared_edges"]) == 5
 
     for layout in ("flat", "tree"):
         assert main(["diff", str(a), str(b), "--format", layout, "--structure-only", "--explain"]) == 0

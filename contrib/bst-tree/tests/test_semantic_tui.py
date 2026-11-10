@@ -45,15 +45,15 @@ async def test_semantic_screen_paths_targets_scopes_and_return(size):
         screen = app.screen
         assert isinstance(screen, SemanticScreen)
         assert screen.category == "retained"
-        assert screen.row_names == ["lib[1]"]
-        assert screen.selected_name == "lib[1]"
+        assert screen.row_names == ["lib[1]@run"]
+        assert screen.selected_name == "lib[1]@run"
         screen.query_one("#sem-section", Select).value = "paths"
         await pilot.pause()
         assert screen.query_one(RichLog).lines
         screen.query_one("#sem-target", Select).value = "other"
         await pilot.pause()
         assert screen.category == "effects"
-        assert screen.row_names == ["tool"]
+        assert screen.row_names == ["tool@build"]
         screen.query_one("#sem-scope", Select).value = "run"
         await pilot.pause()
         assert screen.row_names == []
@@ -100,7 +100,7 @@ async def test_all_semantic_view_includes_unchanged_only_when_requested():
         screen = app.screen
         await pilot.press("0")
         await pilot.pause()
-        assert set(screen.row_names) == {"mid", "lib[1]"}
+        assert set(screen.row_names) == {"mid@run", "lib[1]@run"}
         assert app.category == "all"  # screen bindings must not modify the underlying inspector
 
 
@@ -116,11 +116,11 @@ async def test_stale_initial_tab_event_cannot_hide_retained_dependencies():
         # The initial Effects event may arrive after mount switched to Retained.
         screen.tab_changed(Tabs.TabActivated(tabs, tabs.query_one("#sem-effects", Tab)))
         assert screen.category == "retained"
-        assert screen.row_names == ["lib[1]"]
+        assert screen.row_names == ["lib[1]@run"]
         assert screen.focused is screen.query_one(DataTable)
 
 
-async def test_declared_edges_are_visible_when_the_runtime_closure_is_unchanged():
+async def test_legacy_scope_hides_edges_outside_runtime_closure():
     old, new = pair()
     old.targets = new.targets = ["other", "second"]
     old.nodes["second"] = new.nodes["second"] = old.nodes["other"].copy()
@@ -134,10 +134,16 @@ async def test_declared_edges_are_visible_when_the_runtime_closure_is_unchanged(
         screen = app.screen
         assert isinstance(screen, SemanticScreen)
         assert screen.row_names == []
-        assert screen.query_one("#sem-section", Select).value == "declared"
+        assert screen.query_one("#sem-section", Select).value == "overview"
         log = screen.query_one(RichLog)
+        assert not any("app -> lib[1]" in line.text for line in log.lines)
+        screen.query_one("#sem-scope", Select).value = "all"
+        await pilot.pause()
+        screen.query_one("#sem-section", Select).value = "declared"
+        await pilot.pause()
         assert any("app -> lib[1] [build/run -> build]" in line.text for line in log.lines)
         assert not any("second -> mid" in line.text for line in log.lines)
+        screen.query_one("#sem-scope", Select).value = "run"
         screen.query_one("#sem-target", Select).value = "second"
         await pilot.pause()
         screen.query_one("#sem-section", Select).value = "declared"

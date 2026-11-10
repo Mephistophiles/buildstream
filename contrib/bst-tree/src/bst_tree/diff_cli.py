@@ -181,7 +181,14 @@ def run_closure(args, *, legacy_fields=None, with_explanation=False):
 
     old, new = snapshots(args)
     model = SemanticDiff(old, new, args.target)
-    report = model.report(args.scope or "all", show_all=args.all, limit=None if args.format == "json" else 10)
+    scope = args.scope or "all"
+    as_json = args.format == "json"
+    report = model.report(
+        scope,
+        show_all=args.all,
+        limit=None if as_json else 10,
+        include_edges=as_json or (scope == "all" and args.format != "tui"),
+    )
     if args.format == "tui":
         open_tui(args, old, new, set(DIFF_FIELDS) if legacy_fields is None else legacy_fields, semantic_model=model)
     elif args.format == "json":
@@ -213,7 +220,7 @@ def run_standalone_closure(args):
         show_all=args.all,
         labels=(os.path.basename(args.old), os.path.basename(args.new)),
     ).run()
-    return 1 if args.check and has_semantic_changes(model.report(scope, limit=0)) else 0
+    return 1 if args.check and has_semantic_changes(model.report(scope, limit=0, include_edges=False)) else 0
 
 
 def run_explain(args):

@@ -229,10 +229,21 @@ bst-closure-diff before.json after.json --target app.bst --format json
 bst-closure-diff before.json after.json --tui
 ```
 
-With `--scope run`, a dependency that moves from runtime to build-only use
-appears under **Removed**. With `--scope all`, the same change appears under
-**Role changed** if it remains reachable in the build closure. The legacy `bst-tree diff --scope run`
-form selects the same runtime comparison.
+`--scope run` reports only changes to the runtime closure. `--scope build`
+reports only changes to the build closure. The first line gives package totals
+for the selected role. `--scope all` shows two totals and adds a role suffix to
+each package row. For a package that moves from runtime to build-only use, the
+totals and corresponding rows are:
+
+```text
+@build  +1 -0 packages
+@run  +0 -1 packages
+...
++ lib.bst@build [none -> build]
+- lib.bst@run [run -> none]
+```
+
+The legacy `bst-tree diff --scope run` selects the same runtime comparison.
 
 This compares **reachable elements relative to each common requested target**,
 using either basic or detailed snapshots. No new snapshot fields or BuildStream
@@ -250,34 +261,16 @@ A dependency can have both roles. Build dependencies of build dependencies, and
 build dependencies of runtime dependencies, are not automatically part of these
 closures. The target itself is always excluded, including in cyclic snapshots.
 
-The report separates **added**, **removed**, **role changed**, and **still reachable**.
-For example, removing `app -> lib` while retaining `app -> mid -> lib` keeps `lib`
-in the runtime closure. It appears as still reachable, rather than removed. If
-`lib` changes from runtime to build-only use, it appears as a role change. A role
-loss can also be shown as a removal by selecting only that scope.
+Each role reports **added**, **removed** and **still reachable** separately.
+Removing `app -> lib` while retaining `app -> mid -> lib` keeps `lib` in the
+runtime closure, so it contributes to the route changes count. Route changes
+include longer routes even when the shortest witness stays the same.
+`--all` includes unchanged members. Totals count target/dependency pairs within
+each role, so a shared dependency can contribute to several targets.
 
-Still-reachable entries have unchanged role membership but a relevant declared
-route changed. They include changes to longer routes even when one shortest
-witness stays identical. Unchanged dependencies are included only with `--all`.
-Per-target counts are exact and aggregate counts count **target/dependency pairs**,
-so a shared dependency can contribute to several targets.
-
-**Declared edge changes** lists changes to direct dependency types separately,
-including edges outside the selected role's transitive closure. For example,
-`--scope run` shows both `build/run -> build` and `build -> build/run`. With
-explicit `--target` values, the section covers their subgraphs across both
-snapshots, following both types of edges. Use `--all` to show the full list of
-declared edge changes in text output. JSON includes the full list under
-`declared_edges`. The legacy TUI has a **Declared edge changes** section for the
-selected target and scope. The standalone TUI's **Declared edges** view shows
-all types.
-
-`--check` in semantic mode exits 1 for membership or role changes, or changes to
-the requested target set. Changes confined to the declared edge section or to
-routes exit 0. Attribute, source,
-cache-key and snapshot-metadata differences do not affect this status. Use the
-ordinary structural diff when declared edge changes should also fail a check.
-Use `bst-graph-diff` or `bst-key-explain` for field selection.
+`--check` exits 1 for membership changes in the selected role or changes to the
+requested target set. Route-only changes exit 0. Use `bst-graph-diff` to review
+raw edge declarations and `bst-key-explain` to inspect cache-key changes.
 
 Targets requested on only one side are listed separately and their closures are
 not compared: omitting a target from a capture is not evidence that its libraries
@@ -285,11 +278,14 @@ were removed. Repeated `--target TARGET` limits comparison to elements present
 in both snapshots and ignores other target-selection differences. With no common
 targets, the report explicitly states that there is no comparable closure.
 
-Text output shows at most ten entries per category and target, with exact total
-counts. JSON is a complete standalone report (`comparison: "semantic"`,
-`format_version: 1`) containing the selected scope, aggregate summary, per-target
-summaries and `changes` with role lists in `old` and `new`, plus unmatched targets.
-It does not enumerate all paths. Run `bst-key-explain` for the cache-key evidence report.
+Text output shows at most ten entries per category, target and role, with
+exact totals. The `all` report also lists raw declared edge changes in a separate
+section. JSON retains the combined `summary` and `targets[].changes` for
+`--scope all`. It also provides `summary_by_role` and `targets[].by_role`.
+`declared_edges` contains raw declared types in `all`. For `run` or `build`,
+it contains only changed edges participating in that closure, with `old` and
+`new` projected onto the selected role. For example, removing a runtime edge
+under a build dependency can appear as `build -> none` in the build closure.
 Colors follow the usual `--color` and `NO_COLOR` rules.
 
 ### Standalone closure TUI
@@ -297,14 +293,11 @@ Colors follow the usual `--color` and `NO_COLOR` rules.
 `bst-closure-diff --tui` opens a dedicated comparison. Select a common target
 and use **e** to switch between two views:
 
-- **Closure effects** lists additions, removals, role changes and dependencies
-  that are still reachable by a changed route. It follows the selected scope.
-  The detail pane shows before/after witness paths and relevant changed edges.
-  With a single-role scope, it also shows the full role transition.
-- **Declared edges** lists exact changes to `consumer → dependency` declarations
-  under the target in either snapshot. This view covers all edge types
-  regardless of the closure scope. For example, it shows `build/run → build`
-  even if another runtime path still reaches the dependency. Replacing
+- **Closure effects** lists additions, removals and dependencies that remain
+  reachable by a changed route. With `all`, rows carry `@build` or `@run`.
+  The detail pane shows witness paths and changed edges for the row's role.
+- **Declared edges** shows changed edges in the selected closure. Select
+  `all` to inspect raw declarations such as `build/run → build`. Replacing
   `bootstrap.bst` with `linux-base.bst` appears as a removed and an added edge.
 
 Use **t** for target, **s** for scope, **f** for closure category, **/** to search,

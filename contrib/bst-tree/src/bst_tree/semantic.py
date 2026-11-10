@@ -22,7 +22,8 @@ LABELS = {
     "added": "Added", "removed": "Removed", "role_changed": "Role changed",
     "retained": "Still reachable", "unchanged": "Unchanged",
 }
-SCOPES = ("all", "run", "build")
+ROLES = ("build", "run")
+SCOPES = ("all", *ROLES)
 NOTE = "Declared element reachability; not artifact file contents or a prediction that a build will run."
 
 
@@ -57,7 +58,32 @@ class SemanticDiff:
         key = scope, target
         if key in self._declared_edges:
             return self._declared_edges[key]
-        roots = [target] if target is not None else self._declared_targets
+        if scope != "all":
+            result = self._scoped_edges(scope, [target] if target is not None else self.targets)
+        else:
+            roots = [target] if target is not None else self._declared_targets
+            result = self._raw_edges(roots)
+        if len(self._declared_edges) >= 8:
+            self._declared_edges.pop(next(iter(self._declared_edges)))
+        self._declared_edges[key] = result
+        return result
+
+    def _scoped_edges(self, role, targets):
+        # Project a changed edge onto the selected closure, even when a build
+        # closure reaches it through a transitive runtime edge.
+        usage = {}
+        for target in targets:
+            for parent, child, covered in self._target(target)[2]:
+                if role in covered:
+                    before, after = usage.get((parent, child), (False, False))
+                    old_use, new_use = covered[role]
+                    usage[parent, child] = before or old_use, after or new_use
+        return [
+            {"from": parent, "to": child, "old": [role] if before else [], "new": [role] if after else []}
+            for (parent, child), (before, after) in sorted(usage.items())
+        ]
+
+    def _raw_edges(self, roots):
         owners = []
         if roots is not None:
             # Follow both types of edges, independently in each snapshot.
@@ -76,11 +102,7 @@ class SemanticDiff:
             before, after = (graph.edges.get(edge, frozenset()) for graph in self.graphs)
             if owners and not ((before and parent in owners[0]) or (after and parent in owners[1])):
                 continue
-            if scope == "all" or scope in (before ^ after):
-                result.append({"from": parent, "to": child, "old": sorted(before), "new": sorted(after)})
-        if len(self._declared_edges) >= 8:
-            self._declared_edges.pop(next(iter(self._declared_edges)))
-        self._declared_edges[key] = result
+            result.append({"from": parent, "to": child, "old": sorted(before), "new": sorted(after)})
         return result
 
     def _target(self, target):
@@ -163,26 +185,51 @@ class SemanticDiff:
                 result.append({"name": name, "change": category, "old": before, "new": after})
         return result
 
-    def report(self, scope="all", *, show_all=False, limit=None):
+    def counts(self, target, scope):
+        return {category: mask.bit_count() for category, mask in self.masks(target, scope).items()}
+
+    def role_records(self, target, scope, *, show_all=False):
+        return [
+            dict(record, role=role)
+            for role in (ROLES if scope == "all" else (scope,))
+            for record in self.changes(target, role, show_all=show_all)
+        ]
+
+    def report(self, scope="all", *, show_all=False, limit=None, include_edges=True):
         if scope not in SCOPES:
             raise ValueError("Unknown semantic scope: " + scope)
         targets = []
-        summary = {c: 0 for c in CATEGORIES}
+        summary = dict.fromkeys(CATEGORIES, 0)
+        summary_by_role = {role: dict.fromkeys(CATEGORIES, 0) for role in ROLES}
         for target in self.targets:
-            counts = {c: mask.bit_count() for c, mask in self.masks(target, scope).items()}
+            counts = self.counts(target, scope)
             for category, count in counts.items():
                 summary[category] += count
-            targets.append({"target": target, "summary": counts,
-                            "changes": self.changes(target, scope, show_all=show_all, limit=limit)})
-        declared_edges = self.declared_edges(scope)
+            entry = {"target": target, "summary": counts,
+                     "changes": self.changes(target, scope, show_all=show_all, limit=limit)}
+            if scope == "all":
+                entry["by_role"] = {}
+                for role in ROLES:
+                    counts = self.counts(target, role)
+                    for category, count in counts.items():
+                        summary_by_role[role][category] += count
+                    entry["by_role"][role] = {
+                        "summary": counts,
+                        "changes": self.changes(target, role, show_all=show_all, limit=limit),
+                    }
+            targets.append(entry)
+        declared_edges = self.declared_edges(scope) if include_edges else []
         edge_limit = None if show_all else limit
-        return {
+        report = {
             "format_version": 1, "comparison": "semantic", "scope": scope, "summary": summary,
             "targets_added": self.targets_added, "targets_removed": self.targets_removed,
             "targets": targets, "related_limit": limit,
             "declared_edge_count": len(declared_edges), "declared_edges": declared_edges[:edge_limit],
             "notes": [NOTE, "Targets requested on only one side are listed separately; their closures are not compared."],
         }
+        if scope == "all":
+            report["summary_by_role"] = summary_by_role
+        return report
 
     def path(self, side, target, name, role):
         """One deterministic shortest witness in a role; build then runtime, never build then build."""
@@ -216,14 +263,17 @@ class SemanticDiff:
             state = parents[state]
         return list(reversed(result))
 
-    def declared_changes(self, target):
-        """Exact typed edge changes under a target, following all declared edges."""
+    def declared_changes(self, target, scope="all"):
+        """Changed edges in the target subgraph or selected closure."""
         if target not in self.targets:
             raise ValueError("Unknown semantic comparison target: " + target)
         result = []
-        for edge in self.declared_edges("all", target=target):
+        for edge in self.declared_edges(scope, target=target):
             before, after = edge["old"], edge["new"]
-            change = "role_changed" if before and after else "removed" if before else "added"
+            if before and after:
+                change = "retained" if before == after else "role_changed"
+            else:
+                change = "removed" if before else "added"
             result.append(dict(edge, change=change))
         return result
 
@@ -239,9 +289,11 @@ class SemanticDiff:
                 for side, used in enumerate(covered.get(role, (False, False)))
             )]
             if relevant:
-                result.append({"from": parent, "to": child, "roles": relevant,
-                               "old": sorted(self.graphs[0].edges.get((parent, child), ())),
-                               "new": sorted(self.graphs[1].edges.get((parent, child), ()))})
+                if scope == "all":
+                    before, after = (sorted(graph.edges.get((parent, child), ())) for graph in self.graphs)
+                else:
+                    before, after = ([scope] if used else [] for used in covered[scope])
+                result.append({"from": parent, "to": child, "roles": relevant, "old": before, "new": after})
         return result
 
 
@@ -254,44 +306,54 @@ def declared_edge_label(edge):
     return f"{edge['from']} -> {edge['to']} [{role_label(edge['old'])} -> {role_label(edge['new'])}]"
 
 
+def role_summary(role, counts):
+    line = f"@{role}  +{counts['added']} -{counts['removed']} packages"
+    if counts["retained"]:
+        line += f"  ·  routes changed: {counts['retained']}"
+    return line
+
+
 def render_semantic(report, *, color=False):
     def paint(text, category):
-        code = {"added": "32", "removed": "31", "role_changed": "33", "retained": "36"}.get(category)
+        code = {"added": "32", "removed": "31", "retained": "36"}.get(category)
         return f"\033[{code}m{text}\033[0m" if color and code else text
 
-    summary = report["summary"]
-    lines = [f"Dependency effects (scope={report['scope']}): "
-             f"+{summary['added']} -{summary['removed']} ~{summary['role_changed']}; "
-             f"still reachable: {summary['retained']}"]
+    scope = report["scope"]
+    roles = ROLES if scope == "all" else (scope,)
+    summaries = report["summary_by_role"] if scope == "all" else {scope: report["summary"]}
+    lines = [role_summary(role, summaries[role]) for role in roles]
     for key, label in (("targets_added", "Targets only in new snapshot"),
                        ("targets_removed", "Targets only in old snapshot")):
         if report[key]:
             lines.append(label + ": " + ", ".join(report[key]))
     for target in report["targets"]:
-        if not target["changes"]:
-            continue
-        lines.append("\n" + target["target"])
-        for category in CATEGORIES:
-            entries = [r for r in target["changes"] if r["change"] == category]
-            if not entries:
+        for role in roles:
+            view = target["by_role"][role] if scope == "all" else target
+            if not view["changes"]:
                 continue
-            count = target["summary"][category]
-            lines.append(f"  {LABELS[category]} ({count}):")
-            mark = {"added": "+", "removed": "-", "role_changed": "~", "retained": "=", "unchanged": " "}[category]
-            for record in entries:
-                roles = role_label(record["old"]) + " -> " + role_label(record["new"])
-                lines.append(paint(f"    {mark} {record['name']} [{roles}]", category))
-            if len(entries) < count:
-                lines.append(f"    … {count - len(entries)} more; use --format json or --tui")
+            suffix = f"@{role}" if scope == "all" else ""
+            lines.append("\n" + target["target"] + suffix)
+            for category in ("removed", "added", "retained", "unchanged"):
+                entries = [record for record in view["changes"] if record["change"] == category]
+                if not entries:
+                    continue
+                count = view["summary"][category]
+                lines.append(f"  {LABELS[category]} ({count}):")
+                mark = {"added": "+", "removed": "-", "retained": "=", "unchanged": " "}[category]
+                for record in entries:
+                    transition = role_label(record["old"]) + " -> " + role_label(record["new"])
+                    lines.append(paint(f"    {mark} {record['name']}{suffix} [{transition}]", category))
+                if len(entries) < count:
+                    lines.append(f"    … {count - len(entries)} more. Use --format json or --tui.")
     if not has_semantic_changes(report):
         lines.append("\nNo dependency membership or role changes.")
     if not report["targets"]:
-        lines.append("No common requested targets; closures cannot be compared.")
-    if report["declared_edge_count"]:
-        lines.append(f"\nDeclared edge changes ({report['declared_edge_count']}):")
+        lines.append("No common requested targets. Closures cannot be compared.")
+    if scope == "all" and report["declared_edge_count"]:
+        count = report["declared_edge_count"]
         edges = report["declared_edges"]
+        lines.append(f"\nDeclared edge changes ({count}):")
         lines.extend("  " + declared_edge_label(edge) for edge in edges)
-        if len(edges) < report["declared_edge_count"]:
-            lines.append(f"  … {report['declared_edge_count'] - len(edges)} more. Use --all, --format json or --tui.")
-    lines.append("\n" + NOTE)
+        if len(edges) < count:
+            lines.append(f"  … {count - len(edges)} more. Use --all, --format json or --tui.")
     return "\n".join(lines)

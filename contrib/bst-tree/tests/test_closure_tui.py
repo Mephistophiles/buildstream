@@ -67,7 +67,7 @@ async def test_closure_and_edges_keep_roles_and_routes_visible(size):
         assert app.query_one(RichLog).size.height >= 4
         assert ["-", "run", "none", "lib.bst"] in rows(table)
         await pilot.press("down")
-        assert "All roles        build/run → build" in detail(app)
+        assert "build" not in detail(app)
         assert "Before  app.bst → lib.bst" in detail(app)
         assert "After  unreachable" in detail(app)
         await pilot.press("enter")
@@ -77,28 +77,41 @@ async def test_closure_and_edges_keep_roles_and_routes_visible(size):
 
         await pilot.press("e")
         assert app.query_one(Tabs).active == "edges"
-        assert app.query_one("#scope", Select).disabled
+        assert not app.query_one("#scope", Select).disabled
         assert rows(table) == [
             ["-", "run", "none", "app.bst → bootstrap.bst"],
-            ["~", "build/run", "build", "app.bst → lib.bst"],
+            ["-", "run", "none", "app.bst → lib.bst"],
             ["+", "none", "run", "app.bst → linux-base.bst"],
-            ["~", "build", "build/run", "app.bst → mid.bst"],
+            ["+", "none", "run", "app.bst → mid.bst"],
         ]
         await pilot.press("down")
-        assert "Declared types   build/run → build" in detail(app)
+        assert "Route roles   run → none" in detail(app)
+        assert "build" not in detail(app)
 
         await pilot.press("/", "m", "i", "d")
         assert app.query_one(Input).value == "mid"
-        assert rows(table) == [["~", "build", "build/run", "app.bst → mid.bst"]]
+        assert rows(table) == [["+", "none", "run", "app.bst → mid.bst"]]
         await pilot.press("escape")
         assert table.has_focus
         app.query_one(Input).value = ""
         app.query_one("#target", Select).value = "other.bst"
         await pilot.pause()
-        assert rows(table) == [["~", "build", "run", "other.bst → tool.bst"]]
+        assert rows(table) == [["+", "none", "run", "other.bst → tool.bst"]]
         await pilot.press("e")
         assert app.query_one("#scope", Select).value == "run"
         assert rows(table) == [["+", "none", "run", "tool.bst"]]
+        scope = app.query_one("#scope", Select)
+        scope.value = "build"
+        await pilot.pause()
+        assert rows(table) == [["-", "build", "none", "tool.bst"]]
+        scope.value = "all"
+        await pilot.pause()
+        assert rows(table) == [
+            ["-", "build", "none", "tool.bst@build"],
+            ["+", "none", "run", "tool.bst@run"],
+        ]
+        assert "@build  +0 -1 packages" in str(app.query_one("#summary").content)
+        assert "@run  +1 -0 packages" in str(app.query_one("#summary").content)
 
 
 async def test_alternate_runtime_path_preserves_closure_but_not_the_declared_edge():
@@ -117,6 +130,9 @@ async def test_alternate_runtime_path_preserves_closure_but_not_the_declared_edg
         assert rows(app.query_one(DataTable)) == [["=", "run", "run", "lib.bst"]]
         assert "After  app.bst → linux-base.bst → lib.bst" in detail(app)
         await pilot.press("e")
+        assert rows(app.query_one(DataTable)) == [["-", "run", "none", "app.bst → lib.bst"]]
+        app.query_one("#scope", Select).value = "all"
+        await pilot.pause()
         assert rows(app.query_one(DataTable)) == [["~", "build/run", "build", "app.bst → lib.bst"]]
 
 
