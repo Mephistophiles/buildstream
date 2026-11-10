@@ -11,13 +11,17 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-"""Structural comparison and bounded tree rendering for DAGs."""
+"""Structural comparison and text rendering for dependency graphs."""
 
-from collections import deque
+from collections import Counter, defaultdict, deque
 import json
+
+from .input_diff import changed_paths
+from .provenance import lookup
 
 NODE_FIELDS = ("kind", "key", "source_info", "workspace")
 DIFF_FIELDS = (*NODE_FIELDS, "metadata", "details")
+MARKS = {"added": "+", "removed": "-", "modified": "~"}
 
 
 def compare(old, new, fields=None):
@@ -84,9 +88,77 @@ def has_changes(delta):
     return bool(delta["nodes"] or delta["edges"] or delta["metadata"])
 
 
+def _paint(text, mark, color):
+    code = {"+": "32", "-": "31", "~": "33"}.get(mark)
+    return f"\033[{code}m{text}\033[0m" if color and code else text
+
+
+def render_flat(old, new, delta, show_all=False, color=False):
+    """List each changed element once and share identical parameter transitions."""
+    statuses = {node["name"]: node["change"] for node in delta["nodes"]}
+    dependencies = defaultdict(list)
+    for edge in delta["edges"]:
+        statuses.setdefault(edge["from"], "modified")
+        mark = MARKS[edge["change"]]
+        before, after = ("/".join(edge[side] or []) for side in ("old", "new"))
+        roles = f"{before} -> {after}" if before and after else before or after
+        dependencies[edge["from"]].append(_paint(f"{mark} {edge['to']} [{roles}]", mark, color))
+
+    affected = defaultdict(list)
+    for node in delta["nodes"]:
+        if node["change"] != "modified":
+            continue
+        before, after = node["old"], node["new"]
+        for path in changed_paths(before, after):
+            values = []
+            for side in (before, after):
+                present, value = lookup(side, path)
+                values.append(json.dumps(value, ensure_ascii=False, sort_keys=True) if present else "[absent]")
+            affected[(path, *values)].append(node["name"])
+
+    def describe(transition):
+        path, before, after = transition
+        label = path.removeprefix("/details/").lstrip("/")
+        return f"{label}: " + _paint(before, "-", color) + " -> " + _paint(after, "+", color)
+
+    shared = []
+    parameters = defaultdict(list)
+    for transition, names in affected.items():
+        note = describe(transition)
+        if len(names) > 1:
+            label = f"@{len(shared) + 1}"
+            shared.append(f"  {label} {note}")
+            note = label
+        for name in names:
+            parameters[name].append((transition[0], note))
+    counts = Counter(statuses.values())
+    summary = delta["summary"]
+    lines = [
+        f"Packages: +{counts['added']} -{counts['removed']} ~{counts['modified']} | "
+        f"edges: +{summary['edges_added']} -{summary['edges_removed']} ~{summary['edges_modified']}"
+    ]
+    for field, change in delta["metadata"].items():
+        values = [json.dumps(change[side], ensure_ascii=False, sort_keys=True) for side in ("old", "new")]
+        lines.append(_paint("~", "~", color) + " " + describe((field, *values)))
+
+    names = old.nodes.keys() | new.nodes.keys() if show_all else statuses
+    for name in sorted(names):
+        mark = MARKS.get(statuses.get(name), " ")
+        parts = [_paint(f"{mark} {name}", mark, color)]
+        if name in dependencies:
+            parts.append("deps: " + ", ".join(dependencies[name]))
+        parts.extend(note for _, note in sorted(parameters.get(name, ())))
+        lines.append(" | ".join(parts))
+    if shared:
+        lines.append("\nShared parameter changes:")
+        lines.extend(shared)
+    if not has_changes(delta):
+        lines.append("No changes.")
+    return "\n".join(lines)
+
+
 def render_tree(old, new, delta, show_all=False, color=False, reverse=False):
     """Render changed edges and context paths without unrelated shared branches."""
-    marks = {"added": "+", "removed": "-", "modified": "~"}
     node_changes = {n["name"]: n for n in delta["nodes"]}
     edge_changes = {(e["from"], e["to"]): e for e in delta["edges"]}
     union = {**old.edges, **new.edges}
@@ -117,10 +189,6 @@ def render_tree(old, new, delta, show_all=False, color=False, reverse=False):
         adjacency[parent].append(child)
         incoming.add(child)
 
-    def paint(text, mark):
-        code = {"+": "32", "-": "31", "~": "33"}.get(mark)
-        return f"\033[{code}m{text}\033[0m" if color and code else text
-
     lines = [
         "Nodes: +{nodes_added} -{nodes_removed} ~{nodes_modified}; edges: +{edges_added} -{edges_removed} ~{edges_modified}".format(
             **delta["summary"]
@@ -130,9 +198,10 @@ def render_tree(old, new, delta, show_all=False, color=False, reverse=False):
         lines.append("Reverse dependencies (dependency -> consumers):")
     for field, change in delta["metadata"].items():
         lines.append(
-            paint(
+            _paint(
                 f"~ {field}: {json.dumps(change['old'], ensure_ascii=False)} -> {json.dumps(change['new'], ensure_ascii=False)}",
                 "~",
+                color,
             )
         )
 
@@ -153,16 +222,16 @@ def render_tree(old, new, delta, show_all=False, color=False, reverse=False):
             change = node_changes.get(name)
             edge = (name, parent) if reverse else (parent, name)
             edge_change = edge_changes.get(edge)
-            mark = marks[change["change"]] if change else " "
+            mark = MARKS[change["change"]] if change else " "
             connector = "" if parent is None else "`-- " if last else "|-- "
-            label = paint(f"{mark} {name}", mark)
+            label = _paint(f"{mark} {name}", mark, color)
             if parent is not None:
                 kinds = "/".join(sorted(union[edge]))
                 if edge_change:
                     before = "/".join(edge_change["old"] or []) or "none"
                     after = "/".join(edge_change["new"] or []) or "none"
-                    edge_mark = marks[edge_change["change"]]
-                    kinds = paint(f"{edge_mark} {before} -> {after}", edge_mark)
+                    edge_mark = MARKS[edge_change["change"]]
+                    kinds = _paint(f"{edge_mark} {before} -> {after}", edge_mark, color)
                 label += f" [{kinds}]"
             if change and change["change"] == "modified":
                 fields = [field for field in sorted(change["old"]) if change["old"][field] != change["new"][field]]
@@ -170,9 +239,9 @@ def render_tree(old, new, delta, show_all=False, color=False, reverse=False):
                     " {"
                     + ", ".join(
                         f"{f}: "
-                        + paint(json.dumps(change["old"][f], ensure_ascii=False), "-")
+                        + _paint(json.dumps(change["old"][f], ensure_ascii=False), "-", color)
                         + " -> "
-                        + paint(json.dumps(change["new"][f], ensure_ascii=False), "+")
+                        + _paint(json.dumps(change["new"][f], ensure_ascii=False), "+", color)
                         for f in fields
                     )
                     + "}"

@@ -19,7 +19,7 @@ import os
 import sys
 
 from .adapter import capture
-from .diff import DIFF_FIELDS, compare, has_changes, render_tree
+from .diff import DIFF_FIELDS, compare, has_changes, render_flat, render_tree
 from .model import read_snapshot, write_snapshot
 from .inspection import ProjectInspector
 from bst_tools_core.process import CliRunner
@@ -128,9 +128,8 @@ def parser():
     diff.add_argument("new", help="Updated JSON snapshot")
     diff.add_argument(
         "--format",
-        choices=("tree", "json", "tui"),
-        default="tree",
-        help="Output format (default: tree); tui opens an interactive change inspector",
+        choices=("flat", "tree", "json", "tui"),
+        help="Output format (default: flat); tui opens an interactive change inspector",
     )
     diff.add_argument(
         "--tui",
@@ -159,13 +158,13 @@ def parser():
         metavar="TARGET",
         help="Limit semantic comparison to a target requested in both snapshots; repeatable",
     )
-    diff.add_argument("--all", action="store_true", help="Include unchanged branches")
-    diff.add_argument("--reverse", action="store_true", help="Show dependencies followed by their consumers")
+    diff.add_argument("--all", action="store_true", help="Include unchanged elements in text output")
+    diff.add_argument("--reverse", action="store_true", help="Show the tree from dependencies to consumers")
     diff.add_argument(
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help="Color tree output (default: auto; respects NO_COLOR)",
+        help="Color text output (default: auto; respects NO_COLOR)",
     )
     selection = diff.add_mutually_exclusive_group()
     selection.add_argument(
@@ -241,8 +240,12 @@ def main(argv=None):
 
             return run_inspection(args)
         if args.command == "diff":
+            if args.format is None:
+                args.format = "tree" if args.reverse else "flat"
             if args.history and not (args.explain or args.format == "tui"):
                 raise ValueError("--history requires --explain or --format tui")
+            if args.format == "flat" and args.reverse:
+                raise ValueError("--reverse applies to tree output; use --format tree")
             old, new = read_snapshot(args.old), read_snapshot(args.new)
             fields = set(DIFF_FIELDS)
             if args.structure_only:
@@ -316,22 +319,19 @@ def main(argv=None):
                 )
                 if args.format == "json":
                     delta["explanation"] = explanation
-            if explanation is not None and args.format == "tree":
-                print(render_explanation(explanation))
-                return 1 if args.check and has_changes(delta) else 0
-            print(
-                json.dumps(delta, ensure_ascii=False, indent=2, sort_keys=True)
-                if args.format == "json"
-                else render_tree(
-                    old,
-                    new,
-                    delta,
-                    args.all,
-                    color,
-                    reverse=args.reverse,
+            if args.format == "json":
+                print(json.dumps(delta, ensure_ascii=False, indent=2, sort_keys=True))
+            elif args.format == "tree":
+                print(
+                    render_explanation(explanation)
+                    if explanation is not None
+                    else render_tree(old, new, delta, args.all, color, reverse=args.reverse)
                 )
-            )
-            return 1 if args.check and has_changes(delta) else 0
+            else:
+                print(render_flat(old, new, delta, args.all, color))
+                if explanation is not None:
+                    print("\n" + render_explanation(explanation))
+            return 1 if args.check and changed else 0
         if args.command == "snapshot":
             graph = capture(
                 args.targets,

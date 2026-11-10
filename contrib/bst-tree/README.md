@@ -137,25 +137,35 @@ unavailable because snapshots do not contain configuration or files.
 
 ## Comparison
 
-`diff` defaults to noninteractive tree output. `--tui` (or `--format tui`) opens
-the interactive change inspector described below. `+`, `-`, and `~` mark additions, removals, and
-changes. Edge annotations show old/new build/run types. Only changed branches and
-their ancestor context are shown; unchanged paths to the dependency of a changed
-edge are omitted. Filtering attributes also removes branches whose only changes
-were in ignored fields. `--all` includes unchanged branches. Shared leaves repeat
-their local changes without a reference. Shared subtrees are expanded once, with
-later occurrences naming the shared node and the exact output line containing its
-expansion. This keeps large shared graphs and cycles bounded. Counts refer to unique nodes
-and edges. Renames appear as removal plus addition. Metadata differences are
-reported separately. `--color auto` (the default) enables colors in a terminal,
-unless `NO_COLOR` is set. Use `--color always` to preserve colors through a pipe
-(for example, `less -R`) or `--color never` to disable them. Additions are green,
-removals red, modifications yellow; old/new attribute values are red/green.
-JSON output never contains color escapes.
+`diff` defaults to `--format flat`. Each changed element gets one line, sorted by
+its full name. `+`, `-`, and `~` mark additions, removals, and modifications.
+Each dependency change appears on the line for the element that declares it,
+with its build/run types. If several elements have the same old and new values
+for the same parameter path, their lines reference one shared entry such as `@1`.
+Resolved `config`, `vars`, `env`, and `public` changes are shown by parameter path
+when both snapshots contain details. `--all` includes unchanged elements.
 
-The default direction is target -> dependencies: use it to see what changed inside
-a target or compiler. `--reverse` renders dependency -> consumers, useful for
-seeing where a dependency was removed:
+```text
+Packages: +1 -1 ~2 | edges: +1 -1 ~0
+~ app.bst | deps: + new-lib.bst [run], - old-lib.bst [run] | @1
+~ compiler.bst | @1
++ new-lib.bst
+- old-lib.bst
+
+Shared parameter changes:
+  @1 env/CFLAGS: "-O2" -> "-O3"
+```
+
+Renames appear as removal plus addition. Target and snapshot metadata changes
+appear above the package list. `--explain` appends the input and cache-key analysis.
+`--color auto` (the default) enables terminal colors unless `NO_COLOR` is set.
+Use `--color always` to preserve colors through a pipe or `--color never` to
+disable them. `--tui` opens the interactive change inspector described below.
+
+`--format tree` shows paths from targets to dependencies, including the ancestors
+of changed elements and edges. Add `--all` to include unchanged branches.
+`--reverse` selects tree output by default and shows dependencies followed by
+their consumers:
 
 ```sh
 bst-tree diff before.json after.json --structure-only --reverse
@@ -192,10 +202,10 @@ fields are `kind`, `key` (cache key), `source_info`, `workspace`, `details`
 (resolved inputs), and `metadata` (snapshot metadata). These options and `--structure-only` are mutually exclusive.
 Node additions/removals, dependency edges and their build/run types, and targets
 are always compared. `--structure-only` skips all attributes and snapshot metadata.
-Filtering applies to tree and JSON output, counts, and `--check`; nodes changed
+Filtering applies to flat, tree, and JSON output, counts, and `--check`. Nodes changed
 only in ignored fields disappear from the diff. JSON node `old`/`new` objects
 contain only selected attributes (empty objects in structure-only mode).
-`--all` can be combined with any filter to show unchanged branches as context.
+`--all` can be combined with any filter to show unchanged elements as context.
 
 Normal success exits 0. With `--check`, differences in the selected comparison exit 1.
 Errors exit 2. JSON output has its own `format_version: 1`, a summary, node and edge

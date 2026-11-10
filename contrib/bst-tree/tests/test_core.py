@@ -18,8 +18,8 @@ import pytest
 
 from bst_tree.adapter import FIELDS, capture, parse_report
 from bst_tree.cli import main
-from bst_tree.diff import compare, has_changes, render_tree
-from bst_tree.model import Graph, read_snapshot, write_snapshot
+from bst_tree.diff import compare, has_changes, render_flat, render_tree
+from bst_tree.model import DETAIL_FIELDS, Graph, read_snapshot, write_snapshot
 
 
 def node(key=None):
@@ -162,6 +162,45 @@ def test_cli_diff_exit_codes(tmp_path, capsys):
     assert main(["browse", "app.bst"]) == 2
 
 
+def test_cli_flat_diff_shares_exact_parameter_changes(tmp_path, capsys):
+    old, new = graph(), graph()
+    del new.edges["compiler.bst", "bootstrap.bst"]
+    del new.nodes["bootstrap.bst"]
+    new.nodes["extra.bst"] = node()
+    new.edges["app.bst", "extra.bst"] = frozenset(["run"])
+    new.edges["app.bst", "compiler.bst"] = frozenset(["build", "run"])
+    for g in (old, new):
+        g.details = {name: {field: {} for field in DETAIL_FIELDS} for name in g.nodes}
+    for name in ("app.bst", "compiler.bst", "sub:lib.bst"):
+        old.details[name]["env"]["CFLAGS"] = "-Og" if name == "compiler.bst" else "-O2"
+        new.details[name]["env"]["CFLAGS"] = "-O3"
+    old.details["app.bst"]["vars"]["CFLAGS"] = "-O2"
+    new.details["app.bst"]["vars"]["CFLAGS"] = "-O3"
+    new.details["sub:lib.bst"]["env"]["NEW_FLAG"] = None
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+
+    args = ["diff", str(a), str(b), "--check", "--color", "never"]
+    assert main(args) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "Packages: +1 -1 ~3 | edges: +1 -1 ~1",
+        '~ app.bst | deps: ~ compiler.bst [build -> build/run], + extra.bst [run] | @1 | vars/CFLAGS: "-O2" -> "-O3"',
+        "- bootstrap.bst",
+        '~ compiler.bst | deps: - bootstrap.bst [build] | env/CFLAGS: "-Og" -> "-O3"',
+        "+ extra.bst",
+        "~ sub:lib.bst | @1 | env/NEW_FLAG: [absent] -> null",
+        "",
+        "Shared parameter changes:",
+        '  @1 env/CFLAGS: "-O2" -> "-O3"',
+    ]
+    assert main([*args, "--format", "flat", "--structure-only"]) == 1
+    output = capsys.readouterr().out
+    assert "CFLAGS" not in output
+    assert "sub:lib.bst" not in output
+    assert "Packages: +1 -1 ~2" in output
+
+
 def test_capture_errors():
     def fail(args, **kwargs):
         return subprocess.CompletedProcess(args, 17, "")
@@ -197,7 +236,7 @@ def test_key_only_is_not_source_change():
     assert "source_info:" not in output
 
 
-@pytest.mark.parametrize("output_format", ["tree", "json"])
+@pytest.mark.parametrize("output_format", ["flat", "tree", "json"])
 @pytest.mark.parametrize(
     "selection",
     [
@@ -321,6 +360,12 @@ def test_removed_edge_does_not_include_unchanged_shared_branch(fields):
         "    `--   sub:lib.bst [- run -> none]"
     )
     assert "bootstrap.bst" in render_tree(old, new, delta, show_all=True)
+    flat = render_flat(old, new, delta)
+    assert flat.splitlines() == [
+        "Packages: +0 -0 ~1 | edges: +0 -1 ~0",
+        "~ compiler.bst | deps: - sub:lib.bst [run]",
+    ]
+    assert "  bootstrap.bst" in render_flat(old, new, delta, show_all=True).splitlines()
     reverse = render_tree(old, new, delta, reverse=True)
     assert reverse == (
         "Nodes: +0 -0 ~0; edges: +0 -1 ~0\n"
