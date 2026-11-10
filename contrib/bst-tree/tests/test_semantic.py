@@ -290,7 +290,58 @@ def test_cli_runtime_diff_from_a_dependency_of_the_snapshot_root(tmp_path, capsy
     assert "- bootstrap.bst [run -> none]" in output
     assert "- gcc.bst [run -> none]" in output
     assert "+ linux-base.bst [none -> run]" in output
-    assert "linux-toolchain.bst" not in output
+    assert "linux-toolchain.bst" not in output.split("Declared edge changes", 1)[0]
+
+
+def test_scoped_diff_shows_declared_edges_outside_the_runtime_closure(tmp_path, capsys):
+    import json
+    from bst_tree.cli import main
+    from bst_tree.model import write_snapshot
+
+    old = graph({
+        ("sdk.bst", "delivery.bst"): ["build"],
+        ("sdk.bst", "other.bst"): ["build"],
+        ("delivery.bst", "toolchain.bst"): ["build", "run"],
+        ("delivery.bst", "linux-base.bst"): ["build"],
+        ("delivery.bst", "bootstrap.bst"): ["run"],
+        ("other.bst", "bootstrap.bst"): ["build", "run"],
+    }, targets=("sdk.bst",), extra=("new-tool.bst",))
+    new = copy.deepcopy(old)
+    new.edges["delivery.bst", "toolchain.bst"] = frozenset(["build"])
+    new.edges["delivery.bst", "linux-base.bst"] = frozenset(["build", "run"])
+    new.edges["delivery.bst", "new-tool.bst"] = frozenset(["build"])
+    new.edges["other.bst", "bootstrap.bst"] = frozenset(["build"])
+    del new.edges["delivery.bst", "bootstrap.bst"]
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+
+    args = ["diff", str(a), str(b), "--scope", "run", "--check"]
+    for layout in ("flat", "tree"):
+        assert main([*args, "--format", layout]) == 0
+        output = capsys.readouterr().out
+        assert "No dependency membership or role changes" in output
+        assert "Declared edge changes (4)" in output
+        assert "delivery.bst -> toolchain.bst [build/run -> build]" in output
+        assert "delivery.bst -> linux-base.bst [build -> build/run]" in output
+        assert "delivery.bst -> bootstrap.bst [run -> none]" in output
+        assert "new-tool.bst" not in output
+
+    assert main([*args, "--target", "delivery.bst", "--format", "json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["declared_edge_count"] == 3
+    assert {edge["from"] for edge in report["declared_edges"]} == {"delivery.bst"}
+    model = SemanticDiff(old, new)
+    assert len(model.report("run", limit=1)["declared_edges"]) == 1
+    assert len(model.report("run", limit=1, show_all=True)["declared_edges"]) == 4
+
+    for layout in ("flat", "tree"):
+        assert main(["diff", str(a), str(b), "--format", layout, "--structure-only", "--explain"]) == 0
+        output = capsys.readouterr().out
+        assert "build/run -> build" in output
+        assert "build -> build/run" in output
+        assert "bootstrap.bst" in output
+        assert "Change analysis:" in output
 
 
 def test_role_effects_match_independent_traversal_after_random_edge_changes():

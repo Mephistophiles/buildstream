@@ -118,3 +118,29 @@ async def test_stale_initial_tab_event_cannot_hide_retained_dependencies():
         assert screen.category == "retained"
         assert screen.row_names == ["lib[1]"]
         assert screen.focused is screen.query_one(DataTable)
+
+
+async def test_declared_edges_are_visible_when_the_runtime_closure_is_unchanged():
+    old, new = pair()
+    old.targets = new.targets = ["other", "second"]
+    old.nodes["second"] = new.nodes["second"] = old.nodes["other"].copy()
+    old.edges["other", "app"] = new.edges["other", "app"] = frozenset(["build"])
+    old.edges["app", "lib[1]"] = frozenset(["build", "run"])
+    new.edges["app", "lib[1]"] = frozenset(["build"])
+    new.edges["second", "mid"] = frozenset(["run"])
+    app = DiffExplorer(old, new, semantic=True, semantic_scope="run")
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SemanticScreen)
+        assert screen.row_names == []
+        assert screen.query_one("#sem-section", Select).value == "declared"
+        log = screen.query_one(RichLog)
+        assert any("app -> lib[1] [build/run -> build]" in line.text for line in log.lines)
+        assert not any("second -> mid" in line.text for line in log.lines)
+        screen.query_one("#sem-target", Select).value = "second"
+        await pilot.pause()
+        screen.query_one("#sem-section", Select).value = "declared"
+        await pilot.pause()
+        assert any("second -> mid [none -> run]" in line.text for line in log.lines)
+        assert not any("app -> lib[1]" in line.text for line in log.lines)

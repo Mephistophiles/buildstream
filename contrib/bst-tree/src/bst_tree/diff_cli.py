@@ -165,13 +165,11 @@ def run_graph(args, *, with_explanation=False):
         if with_explanation:
             delta["explanation"] = explain(args, old, new, fields)
         output_json(delta)
-    elif args.format == "tree":
-        if with_explanation:
-            print_explanation(explain(args, old, new, fields))
-        else:
-            print(render_tree(old, new, delta, args.all, use_color(args), reverse=args.reverse))
     else:
-        print(render_flat(old, new, delta, args.all, use_color(args)))
+        if args.format == "tree":
+            print(render_tree(old, new, delta, args.all, use_color(args), reverse=args.reverse))
+        else:
+            print(render_flat(old, new, delta, args.all, use_color(args)))
         if with_explanation:
             print()
             print_explanation(explain(args, old, new, fields))

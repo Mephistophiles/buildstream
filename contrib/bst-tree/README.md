@@ -258,13 +258,23 @@ loss can also be shown as a removal by selecting only that scope.
 
 Still-reachable entries have unchanged role membership but a relevant declared
 route changed. They include changes to longer routes even when one shortest
-witness stays identical. Unrelated edge changes and internal build-edge changes
-that do not affect either selected role are omitted. Unchanged dependencies are
-included only with `--all`. Per-target counts are exact; aggregate counts count
-**target/dependency pairs**, so a shared dependency can contribute to several targets.
+witness stays identical. Unchanged dependencies are included only with `--all`.
+Per-target counts are exact and aggregate counts count **target/dependency pairs**,
+so a shared dependency can contribute to several targets.
+
+**Declared edge changes** lists changes to direct dependency types separately,
+including edges outside the selected role's transitive closure. For example,
+`--scope run` shows both `build/run -> build` and `build -> build/run`. With
+explicit `--target` values, the section covers their subgraphs across both
+snapshots, following both types of edges. Use `--all` to show the full list of
+declared edge changes in text output. JSON includes the full list under
+`declared_edges`. The legacy TUI has a **Declared edge changes** section for the
+selected target and scope. The standalone TUI's **Declared edges** view shows
+all types.
 
 `--check` in semantic mode exits 1 for membership or role changes, or changes to
-the requested target set. A route-only reorganization exits 0. Attribute, source,
+the requested target set. Changes confined to the declared edge section or to
+routes exit 0. Attribute, source,
 cache-key and snapshot-metadata differences do not affect this status. Use the
 ordinary structural diff when declared edge changes should also fail a check.
 Use `bst-graph-diff` or `bst-key-explain` for field selection.

@@ -22,7 +22,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Select, Static, Tab, Tabs
 
-from .semantic import LABELS, NOTE, role_label
+from .semantic import LABELS, NOTE, declared_edge_label, role_label
 
 
 class SemanticScreen(Screen):
@@ -85,7 +85,8 @@ class SemanticScreen(Screen):
             with Vertical(id="sem-right"):
                 yield Static("Select a dependency", id="sem-selection", markup=False)
                 yield Select([("Overview", "overview"), ("Witness paths", "paths"),
-                              ("Changed routes", "routes"), ("Snapshot context", "context")],
+                              ("Changed routes", "routes"), ("Declared edge changes", "declared"),
+                              ("Snapshot context", "context")],
                              value="overview", allow_blank=False, id="sem-section")
                 yield RichLog(id="sem-detail", wrap=True, markup=False, highlight=False, auto_scroll=False)
         yield Footer()
@@ -116,7 +117,8 @@ class SemanticScreen(Screen):
         counts = {c: mask.bit_count() for c, mask in self.model.masks(self.target, self.scope).items()} if self.target else {}
         self.query_one("#sem-summary", Static).update(
             f"+{counts.get('added', 0)} added  ·  -{counts.get('removed', 0)} removed  ·  "
-            f"~{counts.get('role_changed', 0)} roles  ·  ={counts.get('retained', 0)} still reachable"
+            f"~{counts.get('role_changed', 0)} roles  ·  ={counts.get('retained', 0)} still reachable  ·  "
+            f"{len(self.model.declared_edges(self.scope, target=self.target or None))} declared edge changes"
         )
         if reset_category:
             effects = sum(counts.get(c, 0) for c in ("added", "removed", "role_changed"))
@@ -147,7 +149,10 @@ class SemanticScreen(Screen):
     def choose(self, name):
         self.selected_name = name
         self.query_one("#sem-selection", Static).update(name or "Target summary / no matching dependencies")
-        self.query_one("#sem-section", Select).value = "overview"
+        section = "overview"
+        if name is None and self.target and self.model.declared_edges(self.scope, target=self.target):
+            section = "declared"
+        self.query_one("#sem-section", Select).value = section
         self.render_detail()
 
     def write_paths(self, log, record, *, full=False):
@@ -179,6 +184,11 @@ class SemanticScreen(Screen):
             for side, graph in zip(("Before", "After"), self.model.graphs):
                 log.write(side + "\n" + json.dumps({"targets": graph.targets, "metadata": graph.metadata},
                                                    ensure_ascii=False, sort_keys=True, indent=2))
+        elif section == "declared":
+            edges = self.model.declared_edges(self.scope, target=self.target or None)
+            log.write(f"Declared edge changes ({len(edges)}):\n")
+            for edge in edges:
+                log.write(declared_edge_label(edge))
         elif record is None:
             log.write("No matching dependencies in this view.\n" if self.target else "No common requested targets.\n")
             log.write("Targets requested on only one side are not interpreted as dependency additions/removals.")

@@ -50,6 +50,38 @@ class SemanticDiff:
         self.adjacency = tuple(g.adjacency() for g in self.graphs)
         self._target_cache = {}
         self._path_cache = {}
+        self._declared_edges = {}
+        self._declared_targets = self.targets if targets is not None else None
+
+    def declared_edges(self, scope, *, target=None):
+        key = scope, target
+        if key in self._declared_edges:
+            return self._declared_edges[key]
+        roots = [target] if target is not None else self._declared_targets
+        owners = []
+        if roots is not None:
+            # Follow both types of edges, independently in each snapshot.
+            for adjacency in self.adjacency:
+                reached = set(roots)
+                pending = list(roots)
+                while pending:
+                    for child, _ in adjacency[pending.pop()]:
+                        if child not in reached:
+                            reached.add(child)
+                            pending.append(child)
+                owners.append(reached)
+        result = []
+        for edge in self.changed_edges:
+            parent, child = edge
+            before, after = (graph.edges.get(edge, frozenset()) for graph in self.graphs)
+            if owners and not ((before and parent in owners[0]) or (after and parent in owners[1])):
+                continue
+            if scope == "all" or scope in (before ^ after):
+                result.append({"from": parent, "to": child, "old": sorted(before), "new": sorted(after)})
+        if len(self._declared_edges) >= 8:
+            self._declared_edges.pop(next(iter(self._declared_edges)))
+        self._declared_edges[key] = result
+        return result
 
     def _target(self, target):
         if target not in self.targets:
@@ -142,10 +174,13 @@ class SemanticDiff:
                 summary[category] += count
             targets.append({"target": target, "summary": counts,
                             "changes": self.changes(target, scope, show_all=show_all, limit=limit)})
+        declared_edges = self.declared_edges(scope)
+        edge_limit = None if show_all else limit
         return {
             "format_version": 1, "comparison": "semantic", "scope": scope, "summary": summary,
             "targets_added": self.targets_added, "targets_removed": self.targets_removed,
             "targets": targets, "related_limit": limit,
+            "declared_edge_count": len(declared_edges), "declared_edges": declared_edges[:edge_limit],
             "notes": [NOTE, "Targets requested on only one side are listed separately; their closures are not compared."],
         }
 
@@ -185,24 +220,11 @@ class SemanticDiff:
         """Exact typed edge changes under a target, following all declared edges."""
         if target not in self.targets:
             raise ValueError("Unknown semantic comparison target: " + target)
-        reachable = []
-        for adjacency in self.adjacency:
-            visited = {target}
-            pending = [target]
-            while pending:
-                for child, _ in adjacency[pending.pop()]:
-                    if child not in visited:
-                        visited.add(child)
-                        pending.append(child)
-            reachable.append(visited)
         result = []
-        old, new = self.graphs
-        for parent, child in self.changed_edges:
-            before = sorted(old.edges.get((parent, child), ()))
-            after = sorted(new.edges.get((parent, child), ()))
-            if (before and parent in reachable[0]) or (after and parent in reachable[1]):
-                change = "role_changed" if before and after else "removed" if before else "added"
-                result.append({"from": parent, "to": child, "old": before, "new": after, "change": change})
+        for edge in self.declared_edges("all", target=target):
+            before, after = edge["old"], edge["new"]
+            change = "role_changed" if before and after else "removed" if before else "added"
+            result.append(dict(edge, change=change))
         return result
 
     def route_changes(self, target, name, scope="all"):
@@ -226,6 +248,10 @@ class SemanticDiff:
 def has_semantic_changes(report):
     return bool(report["targets_added"] or report["targets_removed"]
                 or any(report["summary"][c] for c in ("added", "removed", "role_changed")))
+
+
+def declared_edge_label(edge):
+    return f"{edge['from']} -> {edge['to']} [{role_label(edge['old'])} -> {role_label(edge['new'])}]"
 
 
 def render_semantic(report, *, color=False):
@@ -261,5 +287,11 @@ def render_semantic(report, *, color=False):
         lines.append("\nNo dependency membership or role changes.")
     if not report["targets"]:
         lines.append("No common requested targets; closures cannot be compared.")
+    if report["declared_edge_count"]:
+        lines.append(f"\nDeclared edge changes ({report['declared_edge_count']}):")
+        edges = report["declared_edges"]
+        lines.extend("  " + declared_edge_label(edge) for edge in edges)
+        if len(edges) < report["declared_edge_count"]:
+            lines.append(f"  … {report['declared_edge_count'] - len(edges)} more. Use --all, --format json or --tui.")
     lines.append("\n" + NOTE)
     return "\n".join(lines)
