@@ -18,6 +18,20 @@ test = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [project.scripts]
 bst-tree = "bst_tree.cli:main"
+bst-snapshot = "bst_tree.snapshot:main"
+bst-graph-diff = "bst_tree.diff_cli:graph_main"
+bst-closure-diff = "bst_tree.diff_cli:closure_main"
+bst-key-explain = "bst_tree.diff_cli:explain_main"
+bst-rdeps = "bst_tree.headless:main_rdeps"
+bst-path = "bst_tree.headless:main_path"
+bst-paths = "bst_tree.headless:main_paths"
+bst-chains = "bst_tree.headless:main_chains"
+bst-rebuild-select = "bst_tree.headless:main_rebuild"
+bst-inputs = "bst_tree.headless_inspection:main_inputs"
+bst-source-files = "bst_tree.headless_inspection:main_source_files"
+bst-artifact-files = "bst_tree.headless_inspection:main_artifact_files"
+bst-origin = "bst_tree.origin:main"
+bst-du = "bst_tree.size:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

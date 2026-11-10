@@ -15,20 +15,19 @@
 
 import json
 import re
+import sys
 from bst_tools_core.process import CliRunner
-from .headless import project_arguments
+from .cli_common import command, project_arguments
 from .provenance import provenance_command, validate_report
 
 
-def configure_parser(commands):
-    p = commands.add_parser(
-        "origin",
-        help="Explain where effective config/variables/environment values came from",
-        description="Use the provenance backend or read a saved provenance JSON report.",
-    )
+def configure_parser(p):
+    p.description = "Explain where effective configuration values came from."
     p.add_argument("element", nargs="?", help="Element, including junction qualification")
     p.add_argument(
-        "--from-report", metavar="FILE", help="Read a saved bst show --provenance JSON document without bst"
+        "--from-report",
+        metavar="FILE",
+        help="Read a saved bst show --provenance JSON document without bst (- reads stdin)",
     )
     p.add_argument(
         "--path",
@@ -43,8 +42,6 @@ def configure_parser(commands):
         help="Show applied YAML overrides, list composition and conditions; requires the provenance backend",
     )
     project_arguments(p)
-    p.set_defaults(command="origin")
-    return p
 
 
 def select(report, element=None, paths=(), follow=True, history=False):
@@ -160,7 +157,9 @@ def run_origin(args):
         raise ValueError("origin requires an element or --from-report")
     runner = CliRunner(args.timeout, args.output_limit)
     try:
-        if args.from_report:
+        if args.from_report == "-":
+            report = json.load(sys.stdin)
+        elif args.from_report:
             with open(args.from_report, encoding="utf-8") as stream:
                 report = json.load(stream)
         else:
@@ -181,7 +180,8 @@ def run_origin(args):
                 if not any(f"No such option: {flag}" in str(error) for flag in ("--provenance", "--history")):
                     raise
                 raise ValueError(
-                    "Provenance query failed (install the backend with install-bst-tools.sh --provenance). " + str(error)
+                    "Provenance query failed (install the backend with install-bst-tools.sh --provenance). "
+                    + str(error)
                 ) from error
             report = json.loads(text)
         report = select(
@@ -199,3 +199,7 @@ def run_origin(args):
         return 2 if any(e["unavailable_references"] for e in report["elements"]) else 0
     finally:
         runner.cancel()
+
+
+def main(argv=None):
+    return command("bst-origin", configure_parser, run_origin, argv, intermixed=True)

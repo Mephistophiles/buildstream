@@ -26,16 +26,12 @@ from bst_tools_core.project import command_base, Project
 from bst_tools_core.archive import Archive, FILE_KINDS
 from bst_tools_core.cli import positive_int
 from bst_tools_core.process import CliRunner
-from .headless import project_arguments
+from .cli_common import command, project_arguments
 from .model import Graph, read_snapshot
 
 
-def configure_parser(commands):
-    p = commands.add_parser(
-        "size",
-        help="Measure artifact files and dependency closures, optionally using the shared CAS index",
-        description="Read artifact inventories from tar or CAS, count shared graph nodes once, and report incomplete sizes explicitly.",
-    )
+def configure_parser(p):
+    p.description = "Measure artifact files and dependency closures from tar or CAS inventories."
     p.add_argument("targets", nargs="*", metavar="TARGET")
     p.add_argument("--scope", choices=("all", "run", "build"), default="run")
     p.add_argument(
@@ -54,14 +50,12 @@ def configure_parser(commands):
         help="Exit 1 if complete total logical file bytes exceed this budget",
     )
     project_arguments(p)
-    p.set_defaults(command="size")
     p.add_argument(
         "--cas-directory",
         default=os.environ.get("BST_CAS_DIRECTORY"),
         help="Enable shared bst-cas index using this local BuildStream cas directory (or BST_CAS_DIRECTORY)",
     )
     p.add_argument("--cas-index", help="Shared SQLite index path (or BST_CAS_INDEX); requires CAS mode")
-    return p
 
 
 def reachable(graph, root, adjacency=None):
@@ -279,3 +273,7 @@ def run_size(args):
         raise ValueError("CAS mode requires bst-cas; install ./contrib/bst-cas in the same environment") from error
     with open_index(args) as cas:
         return _run_size(args, cas)
+
+
+def main(argv=None):
+    return command("bst-du", configure_parser, run_size, argv, intermixed=True)

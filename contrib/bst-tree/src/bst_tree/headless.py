@@ -15,139 +15,75 @@
 
 from collections import deque
 from dataclasses import replace
+from functools import partial
 import json
 import sys
 
 from .adapter import capture
 from bst_tools_core.process import CliRunner
-from bst_tools_core.cli import positive_float, positive_int
+from bst_tools_core.cli import positive_int
+from .cli_common import command, project_arguments
 from .model import Graph, read_snapshot
 
-
-def project_arguments(sub, *, formats=("text", "json"), default_format="text"):
-    sub.add_argument("-C", "--directory", help="BuildStream project directory (default: current directory)")
-    sub.add_argument(
-        "-o",
-        "--option",
-        nargs=2,
-        action="append",
-        default=[],
-        metavar=("NAME", "VALUE"),
-        help="Project option; repeatable",
-    )
-    sub.add_argument(
-        "--timeout", type=positive_float, default=120, metavar="SECONDS", help="Timeout per bst command (default: 120)"
-    )
-    sub.add_argument(
-        "--output-limit",
-        type=positive_int,
-        default=32 * 1024 * 1024,
-        metavar="BYTES",
-        help="Maximum captured bytes per bst stream (default: 32 MiB); overflow is an error",
-    )
-    sub.add_argument(
-        "--format",
-        choices=formats,
-        default=default_format,
-        help=f"Output format (default: {default_format}); no terminal required",
-    )
+DESCRIPTIONS = {
+    "tree": "Print a dependency tree from a project or snapshot",
+    "rdeps": "Find an element's consumers within the loaded graph",
+    "paths": "Show one shortest dependency path per requested target",
+    "path": "Show a shortest dependency path between two elements",
+    "chains": "List simple dependency chains between two elements",
+    "rebuild": "Select elements on dependency paths from a target to a changed element",
+}
 
 
-def configure_parser(commands):
-    parsers = {}
-    descriptions = {
-        "tree": "Print a dependency tree from a project or snapshot",
-        "rdeps": "Find an element's consumers within the loaded graph",
-        "paths": "Show one shortest dependency path per requested target",
-    }
-    for command, description in descriptions.items():
-        sub = commands.add_parser(
-            command,
-            help=description,
-            description=description,
-            epilog=f"Example: bst-tree {command} "
-            + ("lib.bst " if command != "tree" else "")
-            + "app.bst -C /project --format json. Use --snapshot graph.json instead of live targets.",
-        )
-        if command != "tree":
-            sub.add_argument("element", help="Exact element name to query in the loaded graph")
-        sub.add_argument(
-            "targets", nargs="*", metavar="TARGET", help="Explicit graph roots; required for live projects"
-        )
-        sub.add_argument(
-            "--snapshot",
-            metavar="FILE",
-            help="Read a saved graph without bst (- reads stdin); cannot be combined with project arguments or live targets",
-        )
-        sub.add_argument(
-            "--scope",
-            choices=("all", "run", "build"),
-            default="all",
-            help="Dependency scope; matches browse semantics (default: all)",
-        )
-        if command == "tree":
-            sub.add_argument(
-                "--match",
-                metavar="TEXT",
-                help="Case-insensitive element-name substring; retain matching nodes and ancestor context",
-            )
-        if command == "rdeps":
-            sub.add_argument("--direct", action="store_true", help="Only immediate consumers (default: transitive)")
-        project_arguments(sub)
-        sub.set_defaults(command=command)
-        parsers[command] = sub
-    from .headless_inspection import configure_parser as configure_inspection
+def configure_parser(parser, query, *, legacy=False):
+    parser.description = DESCRIPTIONS[query]
+    pair = query in ("path", "chains", "rebuild")
+    if pair:
+        parser.add_argument("source", metavar="FROM", help="Exact starting element name")
+        parser.add_argument("element", metavar="TO", help="Exact destination element name")
+        parser.set_defaults(targets=[])
+    else:
+        if query != "tree":
+            parser.add_argument("element", help="Exact element name to query in the loaded graph")
+        parser.add_argument("targets", nargs="*", metavar="TARGET", help="Explicit graph roots for live projects")
 
-    configure_inspection(commands)
-    for command in ("path", "chains", "rebuild"):
-        sub = commands.add_parser(
-            command,
-            help=(
-                "List elements on dependency paths to an updated element"
-                if command == "rebuild"
-                else (
-                    "Show dependency chains between two elements"
-                    if command == "chains"
-                    else "Show a shortest dependency path between two elements"
-                )
-            ),
-            description=(
-                "Select rebuild candidates on all paths from target FROM to changed element TO."
-                if command == "rebuild"
-                else (
-                    "List simple dependency chains from FROM to TO."
-                    if command == "chains"
-                    else "Find one shortest directed path from FROM to TO, following dependencies."
-                )
-            ),
-            epilog=f"Examples: bst-tree {command} app.bst lib.bst -C /project; "
-            f"bst-tree {command} tool.bst lib.bst --snapshot graph.json. "
-            "Exit status: 0 path found, 1 no path, 2 error.",
+    parser.add_argument("--snapshot", metavar="FILE", help="Read a saved graph without bst (- reads stdin)")
+    parser.add_argument(
+        "--scope",
+        choices=("all", "run", "build"),
+        default="all",
+        help="Dependency scope (default: all)",
+    )
+    if query == "tree":
+        parser.add_argument("--match", metavar="TEXT", help="Match names and retain their ancestor context")
+    if query == "rdeps":
+        parser.add_argument("--direct", action="store_true", help="Only immediate consumers (default: transitive)")
+    if query == "chains" or (query == "rebuild" and legacy):
+        parser.add_argument(
+            "--max-chains",
+            type=positive_int,
+            default=1000,
+            metavar="N",
+            help="Maximum chains to print (default: 1000; truncation exits 3)",
         )
-        sub.add_argument("source", metavar="FROM", help="Exact starting element name")
-        sub.add_argument("element", metavar="TO", help="Exact destination element name")
-        sub.add_argument("--snapshot", metavar="FILE", help="Read a saved graph without bst (- reads stdin)")
-        sub.add_argument(
-            "--scope",
-            choices=("all", "run", "build"),
-            default="all",
-            help="Dependency scope relative to FROM (default: all)",
-        )
-        if command in ("chains", "rebuild"):
-            sub.add_argument(
-                "--max-chains",
-                type=positive_int,
-                default=1000,
-                metavar="N",
-                help="Maximum chains to print (default: 1000; truncation exits 3)",
-            )
-        if command == "rebuild":
-            project_arguments(sub, formats=("elements", "chains", "json"), default_format="elements")
-        else:
-            project_arguments(sub)
-        sub.set_defaults(command=command, targets=[])
-        parsers[command] = sub
-    return parsers
+    if query == "rebuild":
+        formats = ("elements", "chains", "json") if legacy else ("elements", "json")
+        project_arguments(parser, formats=formats, default_format="elements")
+    else:
+        project_arguments(parser)
+    parser.set_defaults(command=query)
+
+
+def query_main(query, argv=None):
+    name = "bst-rebuild-select" if query == "rebuild" else f"bst-{query}"
+    return command(name, partial(configure_parser, query=query), run_graph_query, argv, intermixed=True)
+
+
+main_rdeps = partial(query_main, "rdeps")
+main_paths = partial(query_main, "paths")
+main_path = partial(query_main, "path")
+main_chains = partial(query_main, "chains")
+main_rebuild = partial(query_main, "rebuild")
 
 
 def dependency_chains(graph, source, destination, limit):

@@ -1,10 +1,10 @@
 # BuildStream tool suite and bst-tools-core
 
-Six user-facing commands share a small implementation library:
+Six application packages share a small implementation library.
 
 | Package / command | Responsibility |
 | --- | --- |
-| `bst-tree` | Dependency graph browsing, snapshots, structural/semantic graph diff, inspection, provenance and closure sizes |
+| `bst-tree` | Dependency tree browsing and [standalone graph, snapshot, diff, inspection and size commands](../bst-tree/README.md#commands) |
 | `bst-diff` | Artifact file/metadata comparison, abidiff, diffoscope, Bloaty; headless and optional TUI |
 | `bst-elf` | Static ELF dependency/provider audit |
 | `bst-blame` | File ownership, overlaps and content comparisons |
@@ -15,9 +15,8 @@ Six user-facing commands share a small implementation library:
 The domain applications do not import one another: their shared dependencies
 are bst-tools-core and, optionally, the bst-cas library. Shared functionality belongs
 here; specialized artifact comparison belongs only to bst-diff, and graph
-snapshots/diffing belong only to bst-tree. There are no old command aliases or
-implementation forwarding modules. CAS remains a focused optional index rather
-than a general utility dependency.
+snapshots/diffing belong only to bst-tree. The `bst-tree` package installs the graph tools together and accepts the previous
+subcommand syntax for compatibility. CAS remains a focused optional index.
 
 ## Install from this checkout
 

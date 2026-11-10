@@ -121,8 +121,13 @@ def test_snapshot_output_and_global_option_do_not_conflict(monkeypatch, capsys):
         assert options == [["arch", "aarch64"], ["debug", "true"]]
         return graph()
 
-    monkeypatch.setattr("bst_tree.cli.capture", capture)
+    monkeypatch.setattr("bst_tree.snapshot.capture", capture)
     assert main(["-o", "arch", "aarch64", "snapshot", "image.bst", "--option", "debug", "true", "-o", "-"]) == 0
+    assert json.loads(capsys.readouterr().out)["targets"]
+
+    from bst_tree.snapshot import main as snapshot_main
+
+    assert snapshot_main(["image.bst", "--option", "arch", "aarch64", "--option", "debug", "true"]) == 0
     assert json.loads(capsys.readouterr().out)["targets"]
 
 

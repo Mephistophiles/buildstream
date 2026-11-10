@@ -7,7 +7,8 @@ usage() {
 Usage: install-bst-tools.sh [--headless] [--provenance] [--force]
 
 Install bst-cas, bst-tree, bst-diff, bst-elf, bst-blame and bst-grep from
-this checkout. All packages share the bst-cas pipx environment.
+this checkout. The bst-tree package also installs standalone graph tools.
+All packages share the bst-cas pipx environment.
 
   --headless  Omit optional Textual/Rich dependencies on a fresh installation.
   --provenance  Install bst-tree's private history/provenance backend.

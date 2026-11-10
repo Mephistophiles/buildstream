@@ -15,6 +15,7 @@
 
 from dataclasses import asdict
 import json
+from functools import partial
 import os
 from pathlib import Path, PurePosixPath
 import stat
@@ -24,56 +25,56 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from bst_tools_core.process import CliRunner
-from .headless import project_arguments
+from .cli_common import command, project_arguments
 from bst_tools_core.cli import positive_int
 from .inspection import ProjectInspector, preview_file
 from .model import DETAIL_FIELDS, validate_details
 
+INSPECT_COMMANDS = {
+    "build": ("bst-inputs", "Read an element's effective configuration, variables, environment and public data."),
+    "sources": ("bst-source-files", "Inspect an element's source metadata and workspace or checkout files."),
+    "artifacts": ("bst-artifact-files", "List or preview files from an element's artifact."),
+}
 
-def configure_parser(commands):
-    sub = commands.add_parser(
-        "inspect",
-        help="Inspect effective configuration, sources or artifact files without a TUI",
-        description="Read one live element through public BuildStream commands. Source checkout and artifact pull are opt-in.",
-        epilog="Examples: bst-tree inspect app.bst -C /project --format json; "
-        "bst-tree inspect app.bst --section artifacts --path usr/share/app.conf; "
-        "bst-tree inspect app.bst --section sources --checkout --files.",
-    )
-    sub.add_argument("element", help="Element name, including junction-qualified names")
-    sub.add_argument(
-        "--section",
-        choices=("build", "sources", "artifacts"),
-        default="build",
-        help="Inspection section (default: build)",
-    )
-    sub.add_argument(
-        "--path",
-        metavar="PATH",
-        help="Preview an exact relative regular-file path in sources or artifacts; links are not followed",
-    )
-    sub.add_argument(
-        "--files",
-        action="store_true",
-        help="List source files, including hidden files (requires workspace or --checkout)",
-    )
-    sub.add_argument(
-        "--checkout",
-        action="store_true",
-        help="Sources only: create a temporary source checkout including build scripts; may fetch sources; removed on exit",
-    )
-    sub.add_argument(
-        "--pull",
-        action="store_true",
-        help="Artifacts only: explicitly pull this element without dependencies, then inspect it",
-    )
-    sub.add_argument(
-        "--limit",
-        type=positive_int,
-        default=256 * 1024,
-        metavar="BYTES",
-        help="Maximum bytes read for a text preview (default: 256 KiB)",
-    )
-    project_arguments(sub)
+
+def configure_parser(parser, section=None):
+    parser.description = INSPECT_COMMANDS[section][1] if section else "Inspect a live element."
+    parser.add_argument("element", help="Element name, including junction-qualified names")
+    if section is None:
+        parser.add_argument("--section", choices=tuple(INSPECT_COMMANDS), default="build")
+    else:
+        parser.set_defaults(section=section)
+    if section != "build":
+        parser.add_argument("--path", metavar="PATH", help="Preview an exact relative regular-file path")
+        parser.add_argument(
+            "--limit",
+            type=positive_int,
+            default=256 * 1024,
+            metavar="BYTES",
+            help="Maximum bytes read for a text preview (default: 256 KiB)",
+        )
+    if section in (None, "sources"):
+        parser.add_argument("--files", action="store_true", help="List source files, including hidden files")
+        parser.add_argument(
+            "--checkout",
+            action="store_true",
+            help="Create a temporary source checkout with build scripts; may fetch sources",
+        )
+    if section in (None, "artifacts"):
+        parser.add_argument(
+            "--pull", action="store_true", help="Pull this artifact without dependencies before listing"
+        )
+    parser.set_defaults(path=None, files=False, checkout=False, pull=False)
+    project_arguments(parser)
+
+
+def inspection_main(section, argv=None):
+    return command(INSPECT_COMMANDS[section][0], partial(configure_parser, section=section), run_inspection, argv)
+
+
+main_inputs = partial(inspection_main, "build")
+main_source_files = partial(inspection_main, "sources")
+main_artifact_files = partial(inspection_main, "artifacts")
 
 
 def yaml_value(text, expected, field):

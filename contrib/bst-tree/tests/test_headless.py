@@ -288,7 +288,7 @@ assert main(['inspect','--help']) is None
 def test_snapshot_stdout_can_feed_headless_stdin(monkeypatch, capsys):
     import io
 
-    monkeypatch.setattr("bst_tree.cli.capture", lambda *args, **kwargs: graph())
+    monkeypatch.setattr("bst_tree.snapshot.capture", lambda *args, **kwargs: graph())
     assert main(["snapshot", "app", "-o", "-"]) == 0
     snapshot = capsys.readouterr().out
     assert Graph.from_dict(json.loads(snapshot)).targets == ["app", "other"]
@@ -441,7 +441,7 @@ def test_snapshot_timeout_reaches_capture(monkeypatch, capsys, flags, expected):
         assert kwargs["timeout"] == expected
         return graph()
 
-    monkeypatch.setattr("bst_tree.cli.capture", capture)
+    monkeypatch.setattr("bst_tree.snapshot.capture", capture)
     assert main(["snapshot", "app", "-o", "-", *flags]) == 0
     assert json.loads(capsys.readouterr().out)["targets"]
 

@@ -53,7 +53,10 @@ jobs:
           ./contrib/install-bst-tools.sh --force
       - name: Check entry points and dependencies
         run: |
-          for tool in bst-cas bst-tree bst-diff bst-elf bst-blame bst-grep; do
+          for tool in bst-cas bst-tree bst-diff bst-elf bst-blame bst-grep \
+              bst-snapshot bst-graph-diff bst-closure-diff bst-key-explain \
+              bst-rdeps bst-path bst-paths bst-chains bst-rebuild-select \
+              bst-inputs bst-source-files bst-artifact-files bst-origin bst-du; do
             "$PIPX_BIN_DIR/$tool" --help >/dev/null
           done
           pipx runpip bst-cas check

@@ -32,37 +32,46 @@ for installing all commands together.
 
 ## Commands
 
-| Command | Purpose | Requirements |
-| --- | --- | --- |
-| `browse -C PROJECT TARGET...` | Explore a live graph and inspect elements | Working `bst`, project plugins, and a terminal |
-| `browse --snapshot FILE` | Explore a saved graph | A terminal; no original project or `bst` required |
-| `snapshot -C PROJECT TARGET... -o FILE` | Save the full graph as JSON | Working `bst` and project plugins; no terminal required |
-| `diff OLD NEW` | Compare saved graphs as text or JSON | Neither `bst` nor a terminal required |
-| `diff OLD NEW --tui` | Inspect changes and dependency candidates interactively | A terminal; no `bst` required |
-| `tree TARGET...` | Print dependencies, optionally filtering names with `--match` | Working `bst`, or a saved graph with `--snapshot` |
-| `rdeps ELEMENT TARGET...` | Print direct or transitive consumers in the loaded graph | Working `bst`, or a saved graph with `--snapshot` |
-| `paths ELEMENT TARGET...` | Print one shortest path per target to an element | Working `bst`, or a saved graph with `--snapshot` |
-| `inspect ELEMENT` | Read effective configuration, source provenance or artifact files | Working `bst` and project plugins |
+Installing the `bst-tree` package puts these executables on PATH.
 
-Live `browse` and `snapshot` require at least one explicit target. `-C` defaults
-to the current directory. Multiple targets, junction-qualified names, and repeated
-`--option NAME VALUE` are supported; live queries run in strict mode.
-`browse --snapshot` cannot be combined with targets, `-C`, or project options.
+| Executable | Purpose |
+| --- | --- |
+| `bst-tree browse` / `bst-tree tree` | Browse or print dependencies from a project or snapshot |
+| `bst-snapshot` | Capture a portable JSON dependency graph and optional inputs |
+| `bst-graph-diff` | Compare element attributes, declared edges and targets |
+| `bst-closure-diff` | Compare dependency reachability and build/runtime roles per target |
+| `bst-key-explain` | Report observed input changes, dependency candidates and captured provenance |
+| `bst-rdeps` | Find direct or transitive consumers in the loaded graph |
+| `bst-path` / `bst-paths` | Find a shortest path between two elements or one per requested target |
+| `bst-chains` | Enumerate simple dependency chains between two elements |
+| `bst-rebuild-select` | Select and order elements on paths from a target to a changed element |
+| `bst-inputs` | Print effective configuration, variables, environment and public data |
+| `bst-source-files` | Inspect source metadata, workspace files or a temporary checkout |
+| `bst-artifact-files` | List or preview an element's artifact files |
+| `bst-origin` | Query YAML input provenance and override history |
+| `bst-du` | Measure artifact files and dependency closures |
+
+Each executable has its own `--help`. Existing `bst-tree` subcommand invocations
+remain available for compatibility.
+
+Live `browse` and `bst-snapshot` require explicit targets. `-C` defaults to the
+current directory. Targets can be junction-qualified and live queries run in
+strict mode. `browse --snapshot` cannot be combined with targets, `-C`, or
+project options.
 
 ```sh
 bst-tree browse -C /path/to/project --option arch x86-64 app.bst sdk.bst:tools.bst
-bst-tree snapshot -C /path/to/project app.bst -o before.json
+bst-snapshot -C /path/to/project app.bst -o before.json
 # After changing the project:
-bst-tree snapshot -C /path/to/project app.bst -o after.json
-bst-tree diff before.json after.json
-bst-tree diff before.json after.json --format json --check
+bst-snapshot -C /path/to/project app.bst -o after.json
+bst-graph-diff before.json after.json
+bst-closure-diff before.json after.json --scope run --format json --check
 bst-tree browse --snapshot before.json
 ```
 
-Snapshot writes are atomic and **replace an existing output file**; `-o -` writes
-JSON to stdout instead. Snapshots
-always contain the full graph; changing the UI scope does not modify the snapshot.
-Use `bst-tree --help` or `bst-tree COMMAND --help` for argument descriptions.
+`bst-snapshot` writes JSON to stdout by default. `-o FILE` atomically replaces the
+output file. The legacy `bst-tree snapshot` form still requires `-o FILE` or
+`-o -`. Each headless comparison accepts `-` in place of one snapshot file.
 
 ## Navigation
 
@@ -137,7 +146,7 @@ unavailable because snapshots do not contain configuration or files.
 
 ## Comparison
 
-`diff` defaults to `--format flat`. Each changed element gets one line, sorted by
+`bst-graph-diff` defaults to `--format flat`. Each changed element gets one line, sorted by
 its full name. `+`, `-`, and `~` mark additions, removals, and modifications.
 Each dependency change appears on the line for the element that declares it,
 with its build/run types. If several elements have the same old and new values
@@ -157,7 +166,7 @@ Shared parameter changes:
 ```
 
 Renames appear as removal plus addition. Target and snapshot metadata changes
-appear above the package list. `--explain` appends the input and cache-key analysis.
+appear above the package list. Run `bst-key-explain` for input and cache-key analysis.
 `--color auto` (the default) enables terminal colors unless `NO_COLOR` is set.
 Use `--color always` to preserve colors through a pipe or `--color never` to
 disable them. `--tui` opens the interactive change inspector described below.
@@ -168,7 +177,7 @@ of changed elements and edges. Add `--all` to include unchanged branches.
 their consumers:
 
 ```sh
-bst-tree diff before.json after.json --structure-only --reverse
+bst-graph-diff before.json after.json --structure-only --reverse
 ```
 
 For example, removing `compiler.bst -> lib.bst` while keeping `app.bst -> lib.bst`
@@ -184,7 +193,7 @@ Reverse dependencies (dependency -> consumers):
 
 Here the edge annotation on `compiler.bst` describes its dependency on `lib.bst`.
 This shows changed declared relationships and context, not a calculation of
-whether a target lost all transitive paths to a dependency; use `--semantic`
+whether a target lost all transitive paths to a dependency. Use `bst-closure-diff`
 for that comparison. `--reverse` only changes
 tree presentation; JSON edge directions, counts, and `--check` are unchanged.
 
@@ -192,9 +201,9 @@ By default all fields are compared, including cache keys. To focus on a dependen
 reorganization or specific attributes:
 
 ```sh
-bst-tree diff before.json after.json --structure-only
-bst-tree diff before.json after.json --ignore-fields key
-bst-tree diff before.json after.json --fields kind source_info workspace
+bst-graph-diff before.json after.json --structure-only
+bst-graph-diff before.json after.json --ignore-fields key
+bst-graph-diff before.json after.json --fields kind source_info workspace
 ```
 
 `--fields` selects attributes and `--ignore-fields` excludes attributes. Available
@@ -214,14 +223,18 @@ changes with `old`/`new`, and metadata changes.
 ## Semantic dependency comparison
 
 ```sh
-bst-tree diff before.json after.json --semantic
-bst-tree diff before.json after.json --scope run --target app.bst --check
-bst-tree diff before.json after.json --semantic --target app.bst --format json
-bst-tree diff before.json after.json --semantic --tui
+bst-closure-diff before.json after.json
+bst-closure-diff before.json after.json --scope run --check
+bst-closure-diff before.json after.json --target app.bst --format json
+bst-closure-diff before.json after.json --tui
 ```
 
-Either `--semantic` or `--scope` enables comparison of **reachable elements
-relative to each common requested target**,
+With `--scope run`, a dependency that moves from runtime to build-only use
+appears under **Removed**. With `--scope all`, the same change appears under
+**Role changed** if it remains reachable in the build closure. The legacy `bst-tree diff --scope run`
+form selects the same runtime comparison.
+
+This compares **reachable elements relative to each common requested target**,
 using either basic or detailed snapshots. No new snapshot fields or BuildStream
 installation are required. `--scope all` (the default) compares both roles:
 
@@ -234,10 +247,9 @@ closures. The target itself is always excluded, including in cyclic snapshots.
 
 The report separates **added**, **removed**, **role changed**, and **still reachable**.
 For example, removing `app -> lib` while retaining `app -> mid -> lib` keeps `lib`
-in the runtime closure and appears under **Still reachable**. If `lib` changes
-from runtime to build-only use, `--scope run` lists it under **Removed** as
-`- lib [run -> none]`. The default semantic scope (`all`) reports the same
-transition as a role change from `run` to `build`.
+in the runtime closure. It appears as still reachable, rather than removed. If
+`lib` changes from runtime to build-only use, it appears as a role change. A role
+loss can also be shown as a removal by selecting only that scope.
 
 Still-reachable entries have unchanged role membership but a relevant declared
 route changed. They include changes to longer routes even when one shortest
@@ -250,9 +262,7 @@ included only with `--all`. Per-target counts are exact; aggregate counts count
 the requested target set. A route-only reorganization exits 0. Attribute, source,
 cache-key and snapshot-metadata differences do not affect this status. Use the
 ordinary structural diff when declared edge changes should also fail a check.
-`--fields`, `--ignore-fields` and `--structure-only` continue to apply to optional
-`--explain` analysis, but do not change graph reachability. `--reverse` is rejected
-in semantic mode.
+Use `bst-graph-diff` or `bst-key-explain` for field selection.
 
 Targets requested on only one side are listed separately and their closures are
 not compared: omitting a target from a capture is not evidence that its libraries
@@ -264,11 +274,11 @@ Text output shows at most ten entries per category and target, with exact total
 counts. JSON is a complete standalone report (`comparison: "semantic"`,
 `format_version: 1`) containing the selected scope, aggregate summary, per-target
 summaries and `changes` with role lists in `old` and `new`, plus unmatched targets.
-It does not enumerate all paths. `--explain` can add the cache-key evidence report.
+It does not enumerate all paths. Run `bst-key-explain` for the cache-key evidence report.
 Colors follow the usual `--color` and `NO_COLOR` rules.
 
 In the TUI, press **m** from the input-change inspector to open reachability, or
-start there with `--semantic --tui`. Choose a target with **t**, a scope with **s**,
+start there with `bst-closure-diff --tui`. Choose a target with **t**, a scope with **s**,
 and filter dependency names with **/**. **1** shows effects, **2** still-reachable
 entries, and **0** all listed entries. The initial view focuses on effects, or
 on still-reachable entries when there are no membership/role changes. Use **f**
@@ -289,12 +299,12 @@ graphs and does not search for consumers outside them.
 Capture resolved inputs **before and after** the change:
 
 ```sh
-bst-tree snapshot -C /path/to/project app.bst --details -o before.json
+bst-snapshot -C /path/to/project app.bst --details -o before.json
 # Change source refs, element configuration, or project settings.
-bst-tree snapshot -C /path/to/project app.bst --details -o after.json
-bst-tree diff before.json after.json --tui
+bst-snapshot -C /path/to/project app.bst --details -o after.json
+bst-graph-diff before.json after.json --tui
 # For scripts / CI:
-bst-tree diff before.json after.json --explain --format json --check
+bst-key-explain before.json after.json --format json --check
 ```
 
 `--details` adds effective `config`, `vars`, `env`, and `public` mappings to the
@@ -356,9 +366,8 @@ are called out in snapshot context.
 Old snapshots remain useful for graph/key/source comparisons. If either snapshot
 lacks details, resolved-input comparison is skipped and the inspector reports the
 coverage gap. Missing details are not treated as an input removal, and the gap
-alone does not trigger `--check`. Use `--explain` for a bounded text analysis or add
-it to JSON output for the full evidence records. The default noninteractive output
-and JSON diff format remain compatible; the extra `explanation` object is opt-in.
+alone does not trigger `--check`. Use `bst-key-explain` for a bounded text analysis
+or `bst-key-explain --format json` for the complete evidence report.
 Snapshot and noninteractive diff commands still do not import Textual.
 
 ### Input sources on both sides of a diff
@@ -367,19 +376,19 @@ Capture source locations with each snapshot to connect changed resolved settings
 to their winning YAML definitions and transitive variable references:
 
 ```sh
-bst-tree snapshot app.bst --provenance --history -o before.json
+bst-snapshot app.bst --provenance --history -o before.json
 # Change project inputs, or use different --option values for the second snapshot.
-bst-tree snapshot app.bst --provenance --history -o after.json
-bst-tree diff before.json after.json --explain
-bst-tree diff before.json after.json --explain --history
-bst-tree diff before.json after.json --explain --format json
-bst-tree diff before.json after.json --tui
+bst-snapshot app.bst --provenance --history -o after.json
+bst-key-explain before.json after.json
+bst-key-explain before.json after.json --history
+bst-key-explain before.json after.json --format json
+bst-graph-diff before.json after.json --tui
 ```
 
 `snapshot --provenance` implies `--details` and uses the private backend for
 every query in the snapshot. Each query can capture up to 256 MiB per output stream
 with provenance or 32 MiB otherwise. For larger graphs, pass e.g.
-`--output-limit 536870912` (512 MiB) to `bst-tree snapshot`. Add `--history` to capture the full YAML override
+`--output-limit 536870912` (512 MiB) to `bst-snapshot`. Add `--history` to capture the full YAML override
 chain as well as winning locations and references. Provenance is queried
 for the whole selected graph in one invocation. A repeated framed graph/details
 query detects project drift. Exact resolved details come from the provenance
@@ -388,7 +397,7 @@ coerce scalar types. Every saved provenance value must match these lossless
 resolved details. This is not a filesystem transaction; avoid editing the project
 while capturing a snapshot. No build or artifact export is performed.
 
-`diff --explain` shows each changed input's before/after value and independently
+`bst-key-explain` shows each changed input's before/after value and independently
 saved source locations, with transitive variable evidence. Applied conditions are
 shown when captured; the full override chains remain hidden until `--history`
 is requested. In the TUI, choose **Input sources** for all changed inputs and press
@@ -480,24 +489,23 @@ separate [bst-diff](../bst-diff/README.md) project.
 
 ## Headless queries and inspection
 
-`tree`, `rdeps`, `paths` and `inspect` do not require a TTY or import Textual.
-Their default is plain text; `--format json` produces one JSON document on stdout.
+The headless graph and inspection commands run without a TTY or Textual.
+They default to plain text. `--format json` produces one JSON document on stdout.
 BuildStream diagnostics and errors go to stderr. Exit statuses are 0 for a
 successful query (including an empty result), 2 for errors and 130 for cancellation.
-Graph `diff` also supports headless text/JSON and `--check`.
 
 ```sh
 bst-tree tree app.bst sdk.bst -C /project --scope build
 bst-tree tree app.bst -C /project --match llvm --format json
-bst-tree rdeps lib.bst app.bst sdk.bst -C /project --format json
-bst-tree rdeps lib.bst app.bst -C /project --direct
-bst-tree paths lib.bst app.bst -C /project --scope run --format json
+bst-rdeps lib.bst app.bst sdk.bst -C /project --format json
+bst-rdeps lib.bst app.bst -C /project --direct
+bst-paths lib.bst app.bst -C /project --scope run --format json
 
 # Offline queries need neither bst nor the original project:
 bst-tree tree --snapshot graph.json
-bst-tree rdeps lib.bst --snapshot graph.json --format json
-bst-tree paths lib.bst --snapshot graph.json
-bst-tree snapshot app.bst -C /project -o - | bst-tree tree --snapshot - --format json
+bst-rdeps lib.bst --snapshot graph.json --format json
+bst-paths lib.bst --snapshot graph.json
+bst-snapshot app.bst -C /project | bst-tree tree --snapshot - --format json
 ```
 
 Live queries require explicit graph roots (`TARGET...`), with repeated
@@ -523,20 +531,20 @@ include `roots` and a flat `graph` object (`nodes`, `edges`, metadata and any sa
 details); the edge direction remains **consumer → dependency**, even for `rdeps`.
 `rdeps.consumers` excludes the queried element itself. `paths.paths` contains
 `target`, `nodes` and typed `edges` for each witness. Empty query graphs are valid
-results, not snapshots to pass back to `browse --snapshot`. Use `snapshot` to
+results, not snapshots to pass back to `browse --snapshot`. Use `bst-snapshot` to
 produce a complete portable graph.
 
 ```sh
-bst-tree inspect app.bst -C /project --format json
-bst-tree inspect app.bst -C /project --section sources --format json
-bst-tree inspect app.bst -C /project --section sources --files --path .config
-bst-tree inspect app.bst -C /project --section sources --checkout --files --path app/main.c
-bst-tree inspect app.bst -C /project --section artifacts --path usr/share/app.conf --format json
-bst-tree inspect app.bst -C /project --section artifacts --pull --format json
+bst-inputs app.bst -C /project --format json
+bst-source-files app.bst -C /project --format json
+bst-source-files app.bst -C /project --files --path .config
+bst-source-files app.bst -C /project --checkout --files --path app/main.c
+bst-artifact-files app.bst -C /project --path usr/share/app.conf --format json
+bst-artifact-files app.bst -C /project --pull --format json
 ```
 
-`inspect --section build` (the default) returns structured effective `config`,
-`vars`, `env` and `public` data, without executing build commands. `sources`
+`bst-inputs` returns structured effective `config`,
+`vars`, `env` and `public` data, without executing build commands. `bst-source-files`
 returns provenance and workspace location. `--files` lists a workspace, including
 hidden files; symlinks are listed with targets but not traversed. `--path` previews
 an exact relative regular-file path without following links. Without an open
@@ -550,7 +558,7 @@ layout: sources live under the normalized element directory (for example,
 `app/main.c`) and generated build scripts live at the checkout root. Run `--files`
 first to discover exact paths, especially for junction-qualified elements.
 
-`artifacts` lists the selected artifact's paths and long metadata, with no
+`bst-artifact-files` lists the selected artifact's paths and long metadata, with no
 automatic pull. `--pull` explicitly downloads only this element without its
 dependencies before listing. `--path` exports a temporary artifact tar for preview
 without integration or builds; checkout may retrieve missing data through
@@ -574,9 +582,9 @@ graph read from disk or stdin, or the number of source files listed locally.
 ### Path between two elements
 
 ```sh
-bst-tree path app.bst lib.bst -C /project
-bst-tree path tool.bst lib.bst --snapshot graph.json
-bst-tree path tool.bst lib.bst --snapshot graph.json --scope run --format json
+bst-path app.bst lib.bst -C /project
+bst-path tool.bst lib.bst --snapshot graph.json
+bst-path tool.bst lib.bst --snapshot graph.json --scope run --format json
 ```
 
 `path FROM TO` finds one shortest directed path, following consumer-to-dependency
@@ -600,16 +608,16 @@ element. An empty `paths` list represents no path.
 detail, provenance and history capture. Override it with `--timeout SECONDS`:
 
 ```sh
-bst-tree snapshot app.bst -o graph.json --timeout 600
+bst-snapshot app.bst -o graph.json --timeout 600
 ```
 
 ## Artifact and closure sizes
 
 ```sh
-bst-tree size product.bst sdk.bst -C /project --scope run --format json
-bst-tree size product.bst -C /project --check-max 100000000
-bst-tree size --archive app.bst app.tar --archive runtime.bst runtime.tar
-bst-tree size --snapshot graph.json --archive app.bst app.tar --archive runtime.bst runtime.tar
+bst-du product.bst sdk.bst -C /project --scope run --format json
+bst-du product.bst -C /project --check-max 100000000
+bst-du --archive app.bst app.tar --archive runtime.bst runtime.tar
+bst-du --snapshot graph.json --archive app.bst app.tar --archive runtime.bst runtime.tar
 ```
 
 `size` reads each selected artifact once, hashing regular contents in a temporary
@@ -639,13 +647,13 @@ For binary growth attribution, use [bst-diff --bloaty](../bst-diff/README.md).
 ```sh
 # From this checkout, install just the private backend for an existing bst-tree:
 ./contrib/bst-tree/install-provenance.sh
-bst-tree origin app.bst -C /project --path /env/CFLAGS
-bst-tree origin app.bst -C /project --path /config/build-commands --format json
-bst-tree origin app.bst -C /project --option debug True --path /vars/flags
-bst-tree origin app.bst -C /project --history --path /env/CFLAGS
-bst-tree origin app.bst -C /project --history --path /config/build-commands --format json
+bst-origin app.bst -C /project --path /env/CFLAGS
+bst-origin app.bst -C /project --path /config/build-commands --format json
+bst-origin app.bst -C /project --option debug True --path /vars/flags
+bst-origin app.bst -C /project --history --path /env/CFLAGS
+bst-origin app.bst -C /project --history --path /config/build-commands --format json
 "${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance/bst-provenance" show --deps none --provenance app.bst > origins.json
-bst-tree origin --from-report origins.json --path /env/CFLAGS --format json
+bst-origin --from-report origins.json --path /env/CFLAGS --format json
 ```
 
 `origin` follows a value to its winning composed YAML location, then follows
@@ -704,7 +712,7 @@ explicitly synthetic, even where BuildStream internally inherits old coordinates
 
 ```sh
 "${XDG_DATA_HOME:-$HOME/.local/share}/bst-tree/provenance/bst-provenance" show --deps none --provenance --history app.bst > history.json
-bst-tree origin --from-report history.json --history --path /env/CFLAGS
+bst-origin --from-report history.json --history --path /env/CFLAGS
 ```
 
 History reports add `history_available: true` and per-entry `history` arrays with
@@ -744,7 +752,7 @@ environment and point it at the actual local BuildStream CAS:
 ```sh
 python -m pip install ./contrib/bst-tools-core ./contrib/bst-cas ./contrib/bst-tree
 export BST_CAS_DIRECTORY="${XDG_CACHE_HOME:-$HOME/.cache}/buildstream/cas"
-bst-tree size product.bst --format json
+bst-du product.bst --format json
 ```
 
 `--cas-directory DIR` also enables CAS mode; `--cas-index FILE` or
@@ -762,9 +770,9 @@ inputs and artifact comparison continue to use their existing archive readers.
 ### Plain dependency chains
 
 ```sh
-bst-tree chains app.bst lib.bst -C /project
-bst-tree chains app.bst lib.bst --snapshot graph.json
-bst-tree chains app.bst lib.bst --snapshot graph.json --max-chains 10000
+bst-chains app.bst lib.bst -C /project
+bst-chains app.bst lib.bst --snapshot graph.json
+bst-chains app.bst lib.bst --snapshot graph.json --max-chains 10000
 ```
 
 `chains FROM TO` prints simple directed dependency paths, one per line, without
@@ -788,14 +796,14 @@ names and snapshot/stdin input work as for `path`.
 
 ```sh
 # Unique elements on ALL image -> vfs paths, dependencies first:
-bst-tree rebuild image.bst vfs.bst -C /project
+bst-rebuild-select image.bst vfs.bst -C /project
 # vfs.bst somepkg.bst image.bst
 
 # Show the corresponding chains:
-bst-tree rebuild image.bst vfs.bst --snapshot graph.json --format chains
+bst-chains image.bst vfs.bst --snapshot graph.json
 # image.bst -> somepkg.bst -> vfs.bst
 
-bst-tree rebuild image.bst vfs.bst --snapshot graph.json --format json
+bst-rebuild-select image.bst vfs.bst --snapshot graph.json --format json
 ```
 
 `rebuild TARGET CHANGED` selects the union of dependency paths from TARGET to
@@ -807,10 +815,9 @@ with dependencies before consumers. It does not enumerate paths to build this
 list, so graphs with many alternative routes do not cause exponential output.
 Cycles within the selected subgraph are errors; unrelated cycles are ignored.
 
-`--format chains` prints the paths in consumer-to-dependency direction, with the
-same `--max-chains` limit and exit-3 truncation behavior as `chains`. This limit
-never truncates `elements` or JSON. JSON includes `target`, `changed`, `elements`,
-typed `edges`, and `cache_checked: false`. No connection gives empty text stdout
+`bst-chains` prints routes in consumer-to-dependency direction with a separate
+`--max-chains` limit and exit-3 truncation behavior. `bst-rebuild-select --format json` includes
+`target`, `changed`, `elements`, typed `edges`, and `cache_checked: false`. No connection gives empty text stdout
 and exit 1; an unknown endpoint gives exit 2. Live mode, saved snapshots, stdin,
 project options and `--scope` are supported as for `path` (default scope: `all`).
 
@@ -825,17 +832,13 @@ selection can still require building when BuildStream executes a build.
 
 ### Project option shorthand
 
-Like `bst`, `bst-tree` accepts repeatable `-o NAME VALUE` / `--option NAME VALUE`
-before the command. Live query commands and `browse` also accept both spellings
-after the command. Global options come first; command-local options come after.
+Live query executables accept repeatable `-o NAME VALUE` / `--option NAME VALUE`.
+`bst-snapshot` uses `-o FILE` for output and `--option NAME VALUE` for project options.
+The previous `bst-tree -o NAME VALUE COMMAND` form also works.
 
 ```sh
-bst-tree -o arch aarch64 rebuild image.bst vfs.bst -C /project
-bst-tree rebuild image.bst vfs.bst -o arch aarch64 -C /project
-bst-tree -o arch aarch64 snapshot image.bst -o graph.json
+bst-rebuild-select image.bst vfs.bst -o arch aarch64 -C /project
+bst-snapshot image.bst --option arch aarch64 -o graph.json
 ```
 
-For compatibility, **`snapshot -o FILE` still means output**. Use the global
-`bst-tree -o NAME VALUE snapshot ...` form, or `snapshot --option NAME VALUE`,
-for snapshot project options. Project options cannot be used with saved snapshots
-or `diff`, which do not load a live project.
+Project options apply only when a command loads a live project.
