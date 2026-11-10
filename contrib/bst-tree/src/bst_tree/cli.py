@@ -150,7 +150,7 @@ def parser():
     diff.add_argument(
         "--scope",
         choices=("all", "run", "build"),
-        help="Semantic roles to compare (default: all means build and runtime)",
+        help="Enable semantic comparison for the selected roles (all, runtime only, or build only)",
     )
     diff.add_argument(
         "--target",
@@ -240,12 +240,17 @@ def main(argv=None):
 
             return run_inspection(args)
         if args.command == "diff":
+            semantic = args.semantic or args.scope is not None
             if args.format is None:
                 args.format = "tree" if args.reverse else "flat"
             if args.history and not (args.explain or args.format == "tui"):
                 raise ValueError("--history requires --explain or --format tui")
+            if semantic and args.reverse:
+                raise ValueError("--reverse applies to structural tree output; omit it for semantic comparison")
             if args.format == "flat" and args.reverse:
                 raise ValueError("--reverse applies to tree output; use --format tree")
+            if args.target is not None and not semantic:
+                raise ValueError("--target requires --semantic or --scope")
             old, new = read_snapshot(args.old), read_snapshot(args.new)
             fields = set(DIFF_FIELDS)
             if args.structure_only:
@@ -255,16 +260,12 @@ def main(argv=None):
             elif args.ignore_fields:
                 fields -= set(args.ignore_fields)
             delta = compare(old, new, fields=fields)
-            if (args.scope is not None or args.target is not None) and not args.semantic:
-                raise ValueError("--scope and --target require --semantic")
-            if args.semantic and args.reverse:
-                raise ValueError("--reverse applies to structural tree output; omit it for semantic comparison")
             semantic_model = semantic_report = None
             changed = has_changes(delta)
             color = args.color == "always" or (
                 args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
             )
-            if args.semantic:
+            if semantic:
                 from .semantic import SemanticDiff, has_semantic_changes, render_semantic
 
                 semantic_model = SemanticDiff(old, new, args.target)
@@ -286,7 +287,7 @@ def main(argv=None):
                     fields=fields,
                     show_all=args.all,
                     labels=(os.path.basename(args.old), os.path.basename(args.new)),
-                    semantic=args.semantic,
+                    semantic=semantic,
                     semantic_scope=args.scope or "all",
                     semantic_model=semantic_model,
                     history=args.history,

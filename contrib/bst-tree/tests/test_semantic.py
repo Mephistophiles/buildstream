@@ -258,7 +258,13 @@ def test_cli_semantic_json_color_filters_and_validation(tmp_path, capsys):
     assert "explanation" in report
     assert main(["diff", str(a), str(b), "--semantic", "--color", "always"]) == 0
     assert "\033[33m" in capsys.readouterr().out
-    for flags in (["--scope", "run"], ["--target", "app"], ["--semantic", "--target", "missing"], ["--semantic", "--reverse"]):
+    args = ["diff", str(a), str(b), "--scope", "run", "--target", "app", "--check"]
+    assert main(args) == 1
+    assert "- lib [run -> none]" in capsys.readouterr().out
+    assert main([*args, "--format", "json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["targets"][0]["changes"] == [{"name": "lib", "change": "removed", "old": ["run"], "new": []}]
+    for flags in (["--scope", "run", "--reverse"], ["--target", "app"], ["--semantic", "--target", "missing"], ["--semantic", "--reverse"]):
         assert main(["diff", str(a), str(b), *flags]) == 2
         assert capsys.readouterr().err
 

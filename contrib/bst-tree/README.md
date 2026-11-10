@@ -215,12 +215,13 @@ changes with `old`/`new`, and metadata changes.
 
 ```sh
 bst-tree diff before.json after.json --semantic
-bst-tree diff before.json after.json --semantic --scope run --check
+bst-tree diff before.json after.json --scope run --target app.bst --check
 bst-tree diff before.json after.json --semantic --target app.bst --format json
 bst-tree diff before.json after.json --semantic --tui
 ```
 
-This compares **reachable elements relative to each common requested target**,
+Either `--semantic` or `--scope` enables comparison of **reachable elements
+relative to each common requested target**,
 using either basic or detailed snapshots. No new snapshot fields or BuildStream
 installation are required. `--scope all` (the default) compares both roles:
 
@@ -233,9 +234,10 @@ closures. The target itself is always excluded, including in cyclic snapshots.
 
 The report separates **added**, **removed**, **role changed**, and **still reachable**.
 For example, removing `app -> lib` while retaining `app -> mid -> lib` keeps `lib`
-in the runtime closure. It appears as still reachable, rather than removed. If
-`lib` changes from runtime to build-only use, it appears as a role change. A role
-loss can also be shown as a removal by selecting only that scope.
+in the runtime closure and appears under **Still reachable**. If `lib` changes
+from runtime to build-only use, `--scope run` lists it under **Removed** as
+`- lib [run -> none]`. The default semantic scope (`all`) reports the same
+transition as a role change from `run` to `build`.
 
 Still-reachable entries have unchanged role membership but a relevant declared
 route changed. They include changes to longer routes even when one shortest
