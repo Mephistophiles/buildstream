@@ -14,6 +14,8 @@
 """Compare dependency roles and retained routes relative to explicit targets."""
 
 from collections import deque
+from functools import reduce
+from operator import or_
 
 from .keygraph import KeyGraph, members
 
@@ -202,6 +204,28 @@ class SemanticDiff:
             for record in self.changes(target, role, show_all=show_all)
         ]
 
+    def _membership_delta(self, before, after, role, limit):
+        removed, added = before & ~after, after & ~before
+        return {
+            "summary": {"removed": removed.bit_count(), "added": added.bit_count()},
+            "changes": [
+                {"name": name, "change": change, "old": old, "new": new}
+                for mask, change, old, new in (
+                    (removed, "removed", [role], []),
+                    (added, "added", [], [role]),
+                )
+                for name in members(mask, self.names, limit)
+            ],
+        }
+
+    def snapshot_totals(self, scope, *, limit=None):
+        """Compare the union of each role's closures across all snapshot elements."""
+        result = {}
+        for role in ROLES if scope == "all" else (scope,):
+            before, after = (reduce(or_, key.runtime if role == "run" else key.inputs, 0) for key in self.keys)
+            result[role] = self._membership_delta(before, after, role, limit)
+        return result
+
     def nested_closure_deltas(self, consumer, *, limit=None):
         """Compare membership below a consumer without recomputing route evidence."""
         if any(consumer not in graph.nodes for graph in self.graphs):
@@ -210,22 +234,11 @@ class SemanticDiff:
         result = []
         for role in ROLES:
             before, after = self._closure(root, role)
-            if before == after:
-                continue
-            removed, added = before & ~after, after & ~before
-            changes = [
-                {"name": name, "change": change, "old": old, "new": new}
-                for mask, change, old, new in (
-                    (removed, "removed", [role], []),
-                    (added, "added", [], [role]),
-                )
-                for name in members(mask, self.names, limit)
-            ]
-            result.append({
-                "target": consumer, "scope": role,
-                "summary": {"removed": removed.bit_count(), "added": added.bit_count()},
-                "changes": changes,
-            })
+            if before != after:
+                result.append({
+                    "target": consumer, "scope": role,
+                    **self._membership_delta(before, after, role, limit),
+                })
         return result
 
     def report(self, scope="all", *, show_all=False, limit=None, include_edges=True):
@@ -257,6 +270,7 @@ class SemanticDiff:
             "format_version": 1, "comparison": "semantic", "scope": scope, "summary": summary,
             "targets_added": self.targets_added, "targets_removed": self.targets_removed,
             "targets": targets, "related_limit": limit,
+            "snapshot_totals": self.snapshot_totals(scope, limit=edge_limit),
             "declared_edge_count": len(declared_edges), "declared_edges": declared_edges[:edge_limit],
             "notes": [NOTE, "Targets requested on only one side are listed separately; their closures are not compared."],
         }
@@ -379,7 +393,13 @@ def render_semantic(report, *, color=False):
     scope = report["scope"]
     roles = ROLES if scope == "all" else (scope,)
     summaries = report["summary_by_role"] if scope == "all" else {scope: report["summary"]}
-    lines = [role_summary(role, summaries[role]) for role in roles]
+    lines = ["Snapshot-wide dependency changes:"]
+    for role, view in report["snapshot_totals"].items():
+        lines.append(role_summary(role, view["summary"]))
+        lines.extend(package_lines(view, f"@{role}"))
+
+    lines.append("\nSelected-root closure changes:")
+    lines.extend(role_summary(role, summaries[role]) for role in roles)
     for key, label in (("targets_added", "Targets only in new snapshot"),
                        ("targets_removed", "Targets only in old snapshot")):
         if report[key]:

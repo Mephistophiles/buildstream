@@ -306,6 +306,59 @@ def test_cli_runtime_diff_from_a_dependency_of_the_snapshot_root(tmp_path, capsy
     assert "@run  +1 -2 packages" in output
 
 
+def test_snapshot_totals_count_only_complete_role_losses(tmp_path, capsys):
+    import json
+
+    from bst_tree.cli import main
+    from bst_tree.model import write_snapshot
+
+    common = {
+        ("export.bst", "ghc.bst"): ["build"],
+        ("export.bst", "keeper.bst"): ["build"],
+        ("export.bst", "bootstrap.bst"): ["build"],
+        ("export.bst", "build-helper.bst"): ["run"],
+        ("keeper.bst", "shared.bst"): ["run"],
+        ("bootstrap.bst", "gcc.bst"): ["run"],
+    }
+    old = graph({
+        **common,
+        ("ghc.bst", "bootstrap.bst"): ["build", "run"],
+        ("keeper.bst", "bootstrap.bst"): ["run"],
+        ("ghc.bst", "build-helper.bst"): ["build"],
+        ("ghc.bst", "gcc.bst"): ["build"],
+        ("ghc.bst", "shared.bst"): ["run"],
+    }, targets=("export.bst",))
+    new = graph({**common, ("ghc.bst", "bootstrap.bst"): ["build"]}, targets=("export.bst",))
+    before, after = tmp_path / "before.json", tmp_path / "after.json"
+    write_snapshot(old, before)
+    write_snapshot(new, after)
+    args = ["diff", str(before), str(after), "--scope", "all", "--check"]
+    assert main(args) == 0
+    output = capsys.readouterr().out
+    snapshot_text, root_text = output.split("Selected-root closure changes:")
+    assert snapshot_text.startswith("Snapshot-wide dependency changes:")
+    assert "@run  +0 -1 packages" in snapshot_text
+    assert "- bootstrap.bst@run" in snapshot_text
+    assert "@build  +0 -1 packages" in snapshot_text
+    assert "- build-helper.bst@build" in snapshot_text
+    assert "- gcc.bst@" not in snapshot_text
+    assert "- shared.bst@" not in snapshot_text
+    assert "Still reachable" in root_text
+    assert "@run  +0 -0 packages" in root_text
+
+    report = SemanticDiff(old, new).report("all")
+    assert not has_semantic_changes(report)
+    assert [r["name"] for r in report["snapshot_totals"]["run"]["changes"]] == ["bootstrap.bst"]
+    assert [r["name"] for r in report["snapshot_totals"]["build"]["changes"]] == ["build-helper.bst"]
+    assert SemanticDiff(new, old).report("run")["snapshot_totals"]["run"]["summary"] == {"added": 1, "removed": 0}
+
+    assert main([
+        "diff", str(before), str(after), "--scope", "run", "--target", "keeper.bst", "--format", "json"
+    ]) == 0
+    scoped = json.loads(capsys.readouterr().out)
+    assert scoped["snapshot_totals"] == {"run": report["snapshot_totals"]["run"]}
+
+
 def test_nested_consumer_loses_transitive_packages_while_root_retains_them():
     shared = {
         ("export.bst", "ghc.bst"): ["build"],
@@ -370,11 +423,14 @@ def test_scoped_diff_ignores_edges_outside_the_selected_closure(tmp_path, capsys
     args = ["diff", str(a), str(b), "--scope", "run", "--check"]
     for layout in ("flat", "tree"):
         assert main([*args, "--format", layout]) == 0
-        output = capsys.readouterr().out
-        assert "No dependency membership or role changes" in output
-        assert "@run  +0 -0 packages" in output
-        assert "toolchain.bst" not in output
-        assert "bootstrap.bst" not in output
+        snapshot_text, root_text = capsys.readouterr().out.split("Selected-root closure changes:")
+        assert "- toolchain.bst@run" in snapshot_text
+        assert "- bootstrap.bst@run" in snapshot_text
+        assert "new-tool.bst" not in snapshot_text
+        assert "No dependency membership or role changes" in root_text
+        assert "@run  +0 -0 packages" in root_text
+        assert "toolchain.bst" not in root_text
+        assert "bootstrap.bst" not in root_text
 
     assert main([*args, "--target", "delivery.bst", "--format", "json"]) == 1
     report = json.loads(capsys.readouterr().out)

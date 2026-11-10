@@ -230,10 +230,19 @@ bst-closure-diff before.json after.json --tui
 ```
 
 `--scope run` reports only changes to the runtime closure. `--scope build`
-reports only changes to the build closure. The first line gives package totals
-for the selected role. `--scope all` shows two totals and adds a role suffix to
-each package row. For a package that moves from runtime to build-only use, the
-totals and corresponding rows are:
+reports only changes to the build closure. `--scope all` shows both roles.
+The report begins with **Snapshot-wide dependency changes**. For each role,
+it compares the union of that role's closures for every element in each snapshot.
+A package is counted once per role. Removal means it is no longer used in that
+role by any element in the snapshot. For build, this includes packages reached
+through runtime edges below build dependencies.
+
+The snapshot-wide section covers all captured elements even when `--target`
+is set. It is followed by **Selected-root closure changes**, which includes
+**Still reachable** and drives `--check`. JSON exposes the snapshot-wide
+section as `snapshot_totals`. Use `--all` or JSON for the complete list.
+For a package that moves from runtime to build-only use, the report can show
+the following totals and package rows.
 
 ```text
 @build  +1 -0 packages
