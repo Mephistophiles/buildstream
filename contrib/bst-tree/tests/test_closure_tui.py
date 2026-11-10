@@ -138,6 +138,21 @@ async def test_alternate_runtime_path_preserves_closure_but_not_the_declared_edg
         assert rows(app.query_one(DataTable)) == [["~", "build/run", "build", "app.bst → lib.bst"]]
 
 
+async def test_declared_edge_shows_nested_consumer_package_delta():
+    old, new = snapshots()
+    parent = ("other.bst", "app.bst")
+    old = replace(old, edges={**old.edges, parent: frozenset(("build",))})
+    new = replace(new, edges={**new.edges, parent: frozenset(("build",))})
+    app = ClosureDiffApp(SemanticDiff(old, new, ["other.bst"]))
+    async with app.run_test(size=(145, 36)) as pilot:
+        await pilot.pause()
+        await pilot.press("e")
+        app.query_one(Input).value = "app.bst → lib.bst"
+        await pilot.pause()
+        assert "app.bst@run  +2 -2 packages" in detail(app)
+        assert "- lib.bst@run" in detail(app)
+
+
 async def test_target_coverage_is_explicit():
     old, new = snapshots()
     model = SemanticDiff(replace(old, targets=["app.bst"]), replace(new, targets=["other.bst"]))

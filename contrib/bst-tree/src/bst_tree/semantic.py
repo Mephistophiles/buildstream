@@ -110,14 +110,16 @@ class SemanticDiff:
             result.append({"from": parent, "to": child, "old": sorted(before), "new": sorted(after)})
         return result
 
+    def _closure(self, root, role):
+        return tuple((key.runtime if role == "run" else key.inputs)[root] for key in self.keys)
+
     def _target(self, target):
         if target not in self.targets:
             raise ValueError("Unknown semantic comparison target: " + target)
         if target in self._target_cache:
             return self._target_cache[target]
         root = self.index[target]
-        closures = {role: tuple(k.runtime[root] if role == "run" else k.inputs[root] for k in self.keys)
-                    for role in ("run", "build")}
+        closures = {role: self._closure(root, role) for role in ROLES}
         routes = {"run": 0, "build": 0}
         evidence = []
         for parent, child in self.changed_edges:
@@ -200,6 +202,32 @@ class SemanticDiff:
             for record in self.changes(target, role, show_all=show_all)
         ]
 
+    def nested_closure_deltas(self, consumer, *, limit=None):
+        """Compare membership below a consumer without recomputing route evidence."""
+        if any(consumer not in graph.nodes for graph in self.graphs):
+            return []
+        root = self.index[consumer]
+        result = []
+        for role in ROLES:
+            before, after = self._closure(root, role)
+            if before == after:
+                continue
+            removed, added = before & ~after, after & ~before
+            changes = [
+                {"name": name, "change": change, "old": old, "new": new}
+                for mask, change, old, new in (
+                    (removed, "removed", [role], []),
+                    (added, "added", [], [role]),
+                )
+                for name in members(mask, self.names, limit)
+            ]
+            result.append({
+                "target": consumer, "scope": role,
+                "summary": {"removed": removed.bit_count(), "added": added.bit_count()},
+                "changes": changes,
+            })
+        return result
+
     def report(self, scope="all", *, show_all=False, limit=None, include_edges=True):
         if scope not in SCOPES:
             raise ValueError("Unknown semantic scope: " + scope)
@@ -234,6 +262,16 @@ class SemanticDiff:
         }
         if scope == "all":
             report["summary_by_role"] = summary_by_role
+            nested = []
+            if include_edges and self.targets:
+                # The raw report without an explicit target can also cover
+                # edges outside the comparable roots.
+                edges = declared_edges if self._declared_targets is not None else self._raw_edges(self.targets)
+                consumers = {edge["from"] for edge in edges} - set(self.targets)
+                for consumer in sorted(consumers):
+                    nested.extend(self.nested_closure_deltas(consumer, limit=edge_limit))
+            report["nested_closure_count"] = len(nested)
+            report["nested_closures"] = nested[:edge_limit]
         return report
 
     def path(self, side, target, name, role):
@@ -314,7 +352,7 @@ def declared_edge_label(edge):
 
 def role_summary(role, counts):
     line = f"@{role}  +{counts['added']} -{counts['removed']} packages"
-    if counts["retained"]:
+    if counts.get("retained"):
         line += f"  ·  routes changed: {counts['retained']}"
     return line
 
@@ -323,6 +361,20 @@ def render_semantic(report, *, color=False):
     def paint(text, category):
         code = {"added": "32", "removed": "31", "retained": "36"}.get(category)
         return f"\033[{code}m{text}\033[0m" if color and code else text
+
+    def package_lines(view, suffix):
+        result = []
+        for category, mark in (("removed", "-"), ("added", "+"), ("retained", "="), ("unchanged", " ")):
+            entries = [record for record in view["changes"] if record["change"] == category]
+            if not entries:
+                continue
+            count = view["summary"][category]
+            result.append(f"  {LABELS[category]} ({count}):")
+            for record in entries:
+                result.append(paint(f"    {mark} {record['name']}{suffix}", category))
+            if len(entries) < count:
+                result.append(f"    … {count - len(entries)} more. Use --format json.")
+        return result
 
     scope = report["scope"]
     roles = ROLES if scope == "all" else (scope,)
@@ -339,20 +391,9 @@ def render_semantic(report, *, color=False):
                 continue
             suffix = f"@{role}" if scope == "all" else ""
             lines.append("\n" + target["target"] + suffix)
-            for category in ("removed", "added", "retained", "unchanged"):
-                entries = [record for record in view["changes"] if record["change"] == category]
-                if not entries:
-                    continue
-                count = view["summary"][category]
-                lines.append(f"  {LABELS[category]} ({count}):")
-                mark = {"added": "+", "removed": "-", "retained": "=", "unchanged": " "}[category]
-                for record in entries:
-                    transition = role_transition(record["old"], record["new"])
-                    lines.append(paint(f"    {mark} {record['name']}{suffix} [{transition}]", category))
-                if len(entries) < count:
-                    lines.append(f"    … {count - len(entries)} more. Use --format json or --tui.")
+            lines.extend(package_lines(view, suffix))
     if not has_semantic_changes(report):
-        lines.append("\nNo dependency membership or role changes.")
+        lines.append("\nNo dependency membership or role changes at the selected roots.")
     if not report["targets"]:
         lines.append("No common requested targets. Closures cannot be compared.")
     if scope == "all" and report["declared_edge_count"]:
@@ -362,4 +403,14 @@ def render_semantic(report, *, color=False):
         lines.extend("  " + declared_edge_label(edge) for edge in edges)
         if len(edges) < count:
             lines.append(f"  … {count - len(edges)} more. Use --all, --format json or --tui.")
+    if scope == "all" and report["nested_closure_count"]:
+        count = report["nested_closure_count"]
+        nested = report["nested_closures"]
+        lines.append(f"\nNested consumer closure changes ({count}):")
+        for view in nested:
+            role = view["scope"]
+            lines.append(f"\n{view['target']}{role_summary(role, view['summary'])}")
+            lines.extend(package_lines(view, f"@{role}"))
+        if len(nested) < count:
+            lines.append(f"  … {count - len(nested)} more consumer scopes. Use --all or --format json.")
     return "\n".join(lines)

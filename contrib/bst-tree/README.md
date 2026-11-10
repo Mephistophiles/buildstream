@@ -239,8 +239,8 @@ totals and corresponding rows are:
 @build  +1 -0 packages
 @run  +0 -1 packages
 ...
-+ lib.bst@build [none -> build]
-- lib.bst@run [run -> none]
++ lib.bst@build
+- lib.bst@run
 ```
 
 The legacy `bst-tree diff --scope run` selects the same runtime comparison.
@@ -280,7 +280,13 @@ targets, the report explicitly states that there is no comparable closure.
 
 Text output shows at most ten entries per category, target and role, with
 exact totals. The `all` report also lists raw declared edge changes in a separate
-section. JSON retains the combined `summary` and `targets[].changes` for
+section. **Nested consumer closure changes** then compares build and runtime
+membership from consumers whose outgoing declarations changed below the
+selected roots. A package can disappear from such a consumer's closure while
+another path still makes it reachable from a selected root. This section keeps
+the consumer totals separate from the root totals and `--check`. Use `--all`
+or JSON for the complete nested list. JSON exposes it as `nested_closures` and
+retains the combined `summary` and `targets[].changes` for
 `--scope all`. It also provides `summary_by_role` and `targets[].by_role`.
 `declared_edges` contains raw declared types in `all`. For `run` or `build`,
 it contains only changed edges participating in that closure, with `old` and
@@ -299,6 +305,8 @@ and use **e** to switch between two views:
 - **Declared edges** shows changed edges in the selected closure. Select
   `all` to inspect raw declarations such as `build/run → build`. Replacing
   `bootstrap.bst` with `linux-base.bst` appears as a removed and an added edge.
+  Selecting a nested consumer's edge also shows changes to that consumer's
+  build and runtime closures.
 
 Use **t** for target, **s** for scope, **f** for closure category, **/** to search,
 **Enter** to focus the detail pane, **Esc** to return to the list and **q** to exit.

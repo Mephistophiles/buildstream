@@ -222,6 +222,16 @@ class ClosureDiffApp(App):
             if record["to"] != target:
                 roles = self.model.roles(target, record["to"], scope)
                 detail.write(f"Closure roles    {role_transition(*roles, arrow=' → ')}")
+            if scope == "all" and record["from"] != target:
+                for view in self.model.nested_closure_deltas(record["from"], limit=10):
+                    role = view["scope"]
+                    detail.write(Text(f"{view['target']}{role_summary(role, view['summary'])}", style="bold"))
+                    for change in view["changes"]:
+                        kind = change["change"]
+                        detail.write(Text(f"  {MARKS[kind]} {change['name']}@{role}", style=COLORS[kind]))
+                    remaining = sum(view["summary"].values()) - len(view["changes"])
+                    if remaining:
+                        detail.write(f"  … {remaining} more. Use --format json.")
             return
 
         role = record["role"]

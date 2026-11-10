@@ -41,8 +41,8 @@ def test_removed_direct_dependency_stays_reachable_via_another_path():
     assert not has_semantic_changes(model.report())
     output = render_semantic(model.report())
     assert "Still reachable (1)" in output
-    assert "= lib@run [run]" in output
-    assert "run -> run" not in output
+    assert "= lib@run" in output
+    assert "lib@run [" not in output
     assert model.route_changes("app", "lib")[0]["from"] == "app"
 
 
@@ -237,7 +237,7 @@ def test_cli_semantic_check_ignores_retained_routes_and_cache_keys(tmp_path, cap
     assert main(["diff", str(a), str(b), "--semantic", "--scope", "run", "--check"]) == 1
     output = capsys.readouterr().out
     assert "Removed (1)" in output
-    assert "lib [run -> none]" in output
+    assert "- lib" in output
     assert main(["diff", str(a), str(b), "--semantic", "--scope", "build", "--check"]) == 0
 
 
@@ -262,8 +262,8 @@ def test_cli_semantic_json_color_filters_and_validation(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "@build  +1 -0 packages" in output
     assert "@run  +0 -1 packages" in output
-    assert "\033[32m    + lib@build [none -> build]" in output
-    assert "\033[31m    - lib@run [run -> none]" in output
+    assert "\033[32m    + lib@build" in output
+    assert "\033[31m    - lib@run" in output
     assert report["summary_by_role"]["build"]["added"] == 1
     assert report["summary_by_role"]["run"]["removed"] == 1
     assert report["targets"][0]["by_role"]["run"]["changes"] == [
@@ -271,7 +271,7 @@ def test_cli_semantic_json_color_filters_and_validation(tmp_path, capsys):
     ]
     args = ["diff", str(a), str(b), "--scope", "run", "--target", "app", "--check"]
     assert main(args) == 1
-    assert "- lib [run -> none]" in capsys.readouterr().out
+    assert "- lib" in capsys.readouterr().out
     assert main([*args, "--format", "json"]) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["targets"][0]["changes"] == [{"name": "lib", "change": "removed", "old": ["run"], "new": []}]
@@ -299,11 +299,49 @@ def test_cli_runtime_diff_from_a_dependency_of_the_snapshot_root(tmp_path, capsy
     assert "No dependency membership or role changes" in capsys.readouterr().out
     assert main([*args, "--target", "delivery.bst"]) == 1
     output = capsys.readouterr().out
-    assert "- bootstrap.bst [run -> none]" in output
-    assert "- gcc.bst [run -> none]" in output
-    assert "+ linux-base.bst [none -> run]" in output
+    assert "- bootstrap.bst" in output
+    assert "- gcc.bst" in output
+    assert "+ linux-base.bst" in output
     assert "linux-toolchain.bst" not in output
     assert "@run  +1 -2 packages" in output
+
+
+def test_nested_consumer_loses_transitive_packages_while_root_retains_them():
+    shared = {
+        ("export.bst", "ghc.bst"): ["build"],
+        ("export.bst", "keeper.bst"): ["build"],
+        ("keeper.bst", "bootstrap.bst"): ["run"],
+        ("keeper.bst", "linux-base.bst"): ["run"],
+        ("bootstrap.bst", "gcc.bst"): ["run"],
+        ("linux-base.bst", "libc.bst"): ["run"],
+    }
+    old = graph({
+        **shared, ("ghc.bst", "bootstrap.bst"): ["build", "run"], ("unrelated.bst", "gcc.bst"): ["run"],
+    }, targets=("export.bst",))
+    new = graph(
+        {**shared, ("ghc.bst", "bootstrap.bst"): ["build"], ("ghc.bst", "linux-base.bst"): ["run"]},
+        targets=("export.bst",),
+        extra=("unrelated.bst",),
+    )
+    model = SemanticDiff(old, new)
+    report = model.report("all")
+    assert not has_semantic_changes(report)
+    assert report["nested_closure_count"] == 1
+    view, = report["nested_closures"]
+    assert (view["target"], view["scope"]) == ("ghc.bst", "run")
+    assert view["summary"] == {"added": 2, "removed": 2}
+    assert [(r["change"], r["name"]) for r in view["changes"]] == [
+        ("removed", "bootstrap.bst"), ("removed", "gcc.bst"),
+        ("added", "libc.bst"), ("added", "linux-base.bst"),
+    ]
+    output = render_semantic(report)
+    assert "ghc.bst@run  +2 -2 packages" in output
+    assert "- gcc.bst@run\n" in output
+    assert "+ libc.bst@run\n" in output
+    assert len(model.report("all", limit=1)["nested_closures"][0]["changes"]) == 2
+    assert "nested_closures" not in model.report("run")
+    assert not SemanticDiff(old, new, ["keeper.bst"]).report("all")["nested_closures"]
+    assert not SemanticDiff(old, new, ["ghc.bst"]).report("all")["nested_closures"]
 
 
 def test_scoped_diff_ignores_edges_outside_the_selected_closure(tmp_path, capsys):
