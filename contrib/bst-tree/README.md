@@ -705,6 +705,9 @@ It requires Python 3.10+, Python development headers and a C compiler.
 The private environment includes `buildstream-plugins==2.7.0`,
 `buildstream-plugins-community==2.3.0`, and `requests==2.33.1`.
 Install additional project-specific plugins with that directory's `venv/bin/python -m pip install`.
+If the base Python was removed and the private interpreter no longer starts,
+the installer moves the old venv into a `venv-backup.*` directory and rebuilds
+`venv`. Reinstall any additional project-specific plugins in the new environment.
 Rerun the installer after updating the checkout. The system `bst` stays on its
 original version. Ordinary snapshots still use `bst` on PATH. Live provenance
 also supports a patched `bst` on PATH if the private backend is absent.

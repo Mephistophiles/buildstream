@@ -23,7 +23,14 @@ jobs:
       - name: Install the private provenance backend
         run: |
           export XDG_DATA_HOME="$RUNNER_TEMP/bst-tree-data"
+          # Reproduce an old venv whose base interpreter was removed.
+          runtime="$XDG_DATA_HOME/bst-tree/provenance"
+          mkdir -p "$runtime/venv/bin"
+          ln -s "$RUNNER_TEMP/removed-python3" "$runtime/venv/bin/python3"
+          ln -s python3 "$runtime/venv/bin/python"
           ./contrib/bst-tree/install-provenance.sh
+          backups=("$runtime"/venv-backup.*)
+          test -L "${backups[0]}/venv/bin/python3"
           echo "XDG_DATA_HOME=$XDG_DATA_HOME" >> "$GITHUB_ENV"
           # Native regression tests import the fork directly in the pytest process.
           overlays=("$XDG_DATA_HOME"/bst-tree/provenance/overlay.*)
