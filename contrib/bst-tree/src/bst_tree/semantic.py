@@ -181,6 +181,30 @@ class SemanticDiff:
             state = parents[state]
         return list(reversed(result))
 
+    def declared_changes(self, target):
+        """Exact typed edge changes under a target, following all declared edges."""
+        if target not in self.targets:
+            raise ValueError("Unknown semantic comparison target: " + target)
+        reachable = []
+        for adjacency in self.adjacency:
+            visited = {target}
+            pending = [target]
+            while pending:
+                for child, _ in adjacency[pending.pop()]:
+                    if child not in visited:
+                        visited.add(child)
+                        pending.append(child)
+            reachable.append(visited)
+        result = []
+        old, new = self.graphs
+        for parent, child in self.changed_edges:
+            before = sorted(old.edges.get((parent, child), ()))
+            after = sorted(new.edges.get((parent, child), ()))
+            if (before and parent in reachable[0]) or (after and parent in reachable[1]):
+                change = "role_changed" if before and after else "removed" if before else "added"
+                result.append({"from": parent, "to": child, "old": before, "new": after, "change": change})
+        return result
+
     def route_changes(self, target, name, scope="all"):
         _, _, evidence = self._target(target)
         bit = 1 << self.index[name]

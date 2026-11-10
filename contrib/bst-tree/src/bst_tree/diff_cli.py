@@ -117,10 +117,14 @@ def use_color(args):
     return args.color == "always" or (args.color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ)
 
 
-def open_tui(args, old, new, fields, *, semantic_model=None):
+def require_terminal(args):
     if not sys.stdin.isatty() or not sys.stdout.isatty() or "-" in (args.old, args.new):
         raise ValueError("interactive diff requires a terminal (TTY) and two snapshot files")
     require_tui("bst-tree")
+
+
+def open_tui(args, old, new, fields, *, semantic_model=None):
+    require_terminal(args)
     from .diff_tui import DiffExplorer
 
     DiffExplorer(
@@ -194,6 +198,26 @@ def run_closure(args, *, legacy_fields=None, with_explanation=False):
     return 1 if args.check and has_semantic_changes(report) else 0
 
 
+def run_standalone_closure(args):
+    if args.format != "tui":
+        return run_closure(args)
+
+    require_terminal(args)
+    from .closure_tui import ClosureDiffApp
+    from .semantic import SemanticDiff, has_semantic_changes
+
+    old, new = snapshots(args)
+    model = SemanticDiff(old, new, args.target)
+    scope = args.scope or "all"
+    ClosureDiffApp(
+        model,
+        scope=scope,
+        show_all=args.all,
+        labels=(os.path.basename(args.old), os.path.basename(args.new)),
+    ).run()
+    return 1 if args.check and has_semantic_changes(model.report(scope, limit=0)) else 0
+
+
 def run_explain(args):
     old, new = snapshots(args)
     fields = selected_fields(args)
@@ -225,7 +249,7 @@ def graph_main(argv=None):
 
 
 def closure_main(argv=None):
-    return command("bst-closure-diff", configure_closure, run_closure, argv)
+    return command("bst-closure-diff", configure_closure, run_standalone_closure, argv)
 
 
 def explain_main(argv=None):

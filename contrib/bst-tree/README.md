@@ -52,7 +52,7 @@ Installing the `bst-tree` package puts these executables on PATH.
 | `bst-du` | Measure artifact files and dependency closures |
 
 Each executable has its own `--help`. Existing `bst-tree` subcommand invocations
-remain available for compatibility.
+remain available for compatibility. See the [migration roadmap](roadmap.md).
 
 Live `browse` and `bst-snapshot` require explicit targets. `-C` defaults to the
 current directory. Targets can be junction-qualified and live queries run in
@@ -277,18 +277,28 @@ summaries and `changes` with role lists in `old` and `new`, plus unmatched targe
 It does not enumerate all paths. Run `bst-key-explain` for the cache-key evidence report.
 Colors follow the usual `--color` and `NO_COLOR` rules.
 
-In the TUI, press **m** from the input-change inspector to open reachability, or
-start there with `bst-closure-diff --tui`. Choose a target with **t**, a scope with **s**,
-and filter dependency names with **/**. **1** shows effects, **2** still-reachable
-entries, and **0** all listed entries. The initial view focuses on effects, or
-on still-reachable entries when there are no membership/role changes. Use **f**
-to inspect full witness paths, the changed routes relevant to a dependency, or
-snapshot context. Overview paths abbreviate long chains; the full path section
-does not. One deterministic shortest witness is found per role and side, on demand;
-cycles are bounded and all possible paths are never enumerated. Changed-route
-lists show up to 100 entries with exact counts. Escape returns to the input-change
-inspector, preserving its selection; **q** exits. The original CLI mode determines
-`--check` on exit, even if the other view was opened interactively.
+### Standalone closure TUI
+
+`bst-closure-diff --tui` opens a dedicated comparison. Select a common target
+and use **e** to switch between two views:
+
+- **Closure effects** lists additions, removals, role changes and dependencies
+  that are still reachable by a changed route. It follows the selected scope.
+  The detail pane shows before/after witness paths and relevant changed edges.
+  With a single-role scope, it also shows the full role transition.
+- **Declared edges** lists exact changes to `consumer → dependency` declarations
+  under the target in either snapshot. This view covers all edge types
+  regardless of the closure scope. For example, it shows `build/run → build`
+  even if another runtime path still reaches the dependency. Replacing
+  `bootstrap.bst` with `linux-base.bst` appears as a removed and an added edge.
+
+Use **t** for target, **s** for scope, **f** for closure category, **/** to search,
+**Enter** to focus the detail pane, **Esc** to return to the list and **q** to exit.
+`--all` includes unchanged closure members. `--check` still uses the comparison
+scope supplied on the command line when the app exits.
+
+The legacy diff inspector still opens its original reachability screen via **m**
+or `bst-tree diff --semantic --tui`. Press **Esc** there to return to input changes.
 
 Reachability describes declared elements, not the final staged file set or a
 prediction that a build will run. The comparison is exact for the loaded snapshot
@@ -472,7 +482,7 @@ The implementation separates CLI parsing (`cli.py`), public BuildStream CLI
 queries (`adapter.py`), graph validation and snapshots (`model.py`), comparison
 (`diff.py`), change evidence (`explain.py`, with compact build-input reachability
 in `keygraph.py`), target-relative semantic comparison (`semantic.py`), and
-terminal navigation (`tui.py`, `diff_tui.py`, and `semantic_tui.py`). Element inspection lives in
+terminal navigation (`tui.py`, `diff_tui.py`, `semantic_tui.py`, and `closure_tui.py`). Element inspection lives in
 `inspection.py` and `inspection_tui.py`. Snapshot and noninteractive diff commands
 do not import Textual. Each interactive inspection owns a cancellable command runner and its
 temporary exports; late background results cannot update a closed viewer.
