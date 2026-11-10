@@ -122,8 +122,7 @@ def test_runtime_only_changes_do_not_affect_build_scope():
 
 def test_added_and_removed_targets_are_coverage_changes_not_dependency_losses():
     old = graph({("app", "lib"): ["run"]}, targets=("app",))
-    new = copy.deepcopy(old)
-    new.targets = ["lib"]
+    new = graph({}, targets=("lib",))
     report = SemanticDiff(old, new).report()
     assert report["targets"] == []
     assert report["targets_added"] == ["lib"]
@@ -131,7 +130,7 @@ def test_added_and_removed_targets_are_coverage_changes_not_dependency_losses():
     assert report["summary"]["removed"] == 0
     assert has_semantic_changes(report)
     assert "No common requested targets" in render_semantic(report)
-    with pytest.raises(ValueError, match="requested in both"):
+    with pytest.raises(ValueError, match="present in both"):
         SemanticDiff(old, new, targets=["app"])
 
 
@@ -267,6 +266,31 @@ def test_cli_semantic_json_color_filters_and_validation(tmp_path, capsys):
     for flags in (["--scope", "run", "--reverse"], ["--target", "app"], ["--semantic", "--target", "missing"], ["--semantic", "--reverse"]):
         assert main(["diff", str(a), str(b), *flags]) == 2
         assert capsys.readouterr().err
+
+
+def test_cli_runtime_diff_from_a_dependency_of_the_snapshot_root(tmp_path, capsys):
+    from bst_tree.cli import main
+    from bst_tree.model import write_snapshot
+
+    shared = {("sdk.bst", "delivery.bst"): ["build"], ("delivery.bst", "runtime.bst"): ["run"]}
+    old = graph({**shared, ("runtime.bst", "bootstrap.bst"): ["run"],
+                 ("bootstrap.bst", "gcc.bst"): ["run"]}, targets=("sdk.bst",))
+    new = graph({**shared, ("runtime.bst", "linux-base.bst"): ["run"],
+                 ("runtime.bst", "linux-toolchain.bst"): ["build"],
+                 ("linux-toolchain.bst", "gcc.bst"): ["run"]}, targets=("sdk.bst",))
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    write_snapshot(old, a)
+    write_snapshot(new, b)
+
+    args = ["diff", str(a), str(b), "--scope", "run", "--check"]
+    assert main(args) == 0
+    assert "No dependency membership or role changes" in capsys.readouterr().out
+    assert main([*args, "--target", "delivery.bst"]) == 1
+    output = capsys.readouterr().out
+    assert "- bootstrap.bst [run -> none]" in output
+    assert "- gcc.bst [run -> none]" in output
+    assert "+ linux-base.bst [none -> run]" in output
+    assert "linux-toolchain.bst" not in output
 
 
 def test_role_effects_match_independent_traversal_after_random_edge_changes():

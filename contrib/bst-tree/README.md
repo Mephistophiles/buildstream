@@ -236,7 +236,12 @@ form selects the same runtime comparison.
 
 This compares **reachable elements relative to each common requested target**,
 using either basic or detailed snapshots. No new snapshot fields or BuildStream
-installation are required. `--scope all` (the default) compares both roles:
+installation are required. Use `--target` to compare from any element present in
+both snapshots, including a dependency of a snapshot root. For example, use
+`--scope run --target delivery.bst` to compare delivery's runtime dependencies
+when the snapshots were taken from an SDK root.
+
+`--scope all` (the default) compares both roles:
 
 - **run**: the target's transitive runtime dependencies;
 - **build**: its direct build dependencies plus their transitive runtime dependencies.
@@ -266,7 +271,7 @@ Use `bst-graph-diff` or `bst-key-explain` for field selection.
 
 Targets requested on only one side are listed separately and their closures are
 not compared: omitting a target from a capture is not evidence that its libraries
-were removed. Repeated `--target TARGET` limits comparison to targets requested
+were removed. Repeated `--target TARGET` limits comparison to elements present
 in both snapshots and ignores other target-selection differences. With no common
 targets, the report explicitly states that there is no comparable closure.
 

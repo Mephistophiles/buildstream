@@ -46,7 +46,7 @@ def field_arguments(parser):
 def semantic_arguments(parser):
     parser.add_argument("--scope", choices=("all", "run", "build"), help="Dependency roles to compare (default: all)")
     parser.add_argument(
-        "--target", action="append", metavar="TARGET", help="Compare a target requested in both snapshots; repeatable"
+        "--target", action="append", metavar="TARGET", help="Compare from an element present in both snapshots; repeatable (default: common snapshot roots)"
     )
 
 

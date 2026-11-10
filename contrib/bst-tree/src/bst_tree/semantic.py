@@ -38,11 +38,11 @@ class SemanticDiff:
         self.names = sorted(old.nodes.keys() | new.nodes.keys())
         self.index = {name: i for i, name in enumerate(self.names)}
         self.keys = tuple(KeyGraph(g, self.names) for g in self.graphs)
-        common = set(old.targets) & set(new.targets)
-        self.targets = sorted(common if targets is None else set(targets))
-        unknown = set(self.targets) - common
+        common_roots = set(old.targets) & set(new.targets)
+        self.targets = sorted(common_roots if targets is None else set(targets))
+        unknown = [target for target in self.targets if target not in old.nodes or target not in new.nodes]
         if unknown:
-            raise ValueError("Semantic targets must be requested in both snapshots: " + ", ".join(sorted(unknown)))
+            raise ValueError("Semantic targets must be present in both snapshots: " + ", ".join(unknown))
         self.targets_added = sorted(set(new.targets) - set(old.targets)) if targets is None else []
         self.targets_removed = sorted(set(old.targets) - set(new.targets)) if targets is None else []
         self.changed_edges = [(p, c) for p, c in sorted(old.edges.keys() | new.edges.keys())
